@@ -1,0 +1,66 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: nutrirag-ia2-backend
+  servlet:
+    multipart:
+      max-file-size: 25MB
+      max-request-size: 25MB
+
+  # Perfil por defecto: 'demo' usa H2 en memoria + motor híbrido vectorial listo sin requerir Docker,
+  # Cambia a 'pgvector' (SPRING_PROFILES_ACTIVE=pgvector) para usar PostgreSQL + pgvector en Docker.
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:demo}
+
+---
+spring:
+  config:
+    activate:
+      on-profile: demo
+  datasource:
+    url: jdbc:h2:mem:nutrirag_db;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+
+---
+spring:
+  config:
+    activate:
+      on-profile: pgvector
+  datasource:
+    url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/nutrirag_db}
+    driver-class-name: org.postgresql.Driver
+    username: ${POSTGRES_USER:nutrirag_user}
+    password: ${POSTGRES_PASSWORD:nutrirag_password}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+# Configuración del Motor RAG y Proveedores de IA (OpenAI / Gemini / Demo)
+nutrirag:
+  storage:
+    temp-dir: ${java.io.tmpdir}/nutrirag-temp-uploads
+    delete-after-indexing: true
+  chunking:
+    target-tokens: 650
+    overlap-tokens: 100
+  ai:
+    # Opciones: DEMO, OPENAI, GEMINI
+    provider: ${AI_PROVIDER:DEMO}
+    openai-api-key: ${OPENAI_API_KEY:}
+    openai-embedding-model: text-embedding-3-small
+    openai-chat-model: gpt-4o-mini
+    gemini-api-key: ${GEMINI_API_KEY:}
+    gemini-embedding-model: text-embedding-004
+    gemini-chat-model: gemini-2.5-flash
+
