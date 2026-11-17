@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "documentos": [
+    {
+      "id": "doc-oms-01",
+      "tenant_id": "tenant-ia2-demo",
+      "nombre_archivo": "Guia_Clinica_Calorias_y_Macronutrientes_OMS.pdf",
+      "sha256_hash": "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4",
+      "total_paginas": 4,
+      "total_fragmentos": 2,
+      "ocr_aplicado": false,
+      "modelo_embedding": "text-embedding-3-small",
+      "temp_pdf_eliminado": true,
+      "fecha_indexacion_utc": "2026-11-17T12:00:00+00:00"
+    },
+    {
+      "id": "doc-tabla-02",
+      "tenant_id": "tenant-ia2-demo",
+      "nombre_archivo": "Tabla_Composicion_Nutricional_Alimentos_2026.pdf",
+      "sha256_hash": "3a7bd3e2360a3d29eea436fcfb7e44c735d117c42d1c1835420b6b9942dd4f1b",
+      "total_paginas": 6,
+      "total_fragmentos": 2,
+      "ocr_aplicado": true,
+      "modelo_embedding": "text-embedding-3-small",
+      "temp_pdf_eliminado": true,
+      "fecha_indexacion_utc": "2026-11-17T12:05:00+00:00"
+    }
+  ],
+  "fragmentos": [
+    {
+      "id": "doc-oms-01-chk-1",
+      "documento_id": "doc-oms-01",
+      "documento_nombre": "Guia_Clinica_Calorias_y_Macronutrientes_OMS.pdf",
+      "tenant_id": "tenant-ia2-demo",
+      "pagina": 1,
+      "seccion": "1. Balance Energético y Déficit Calórico",
+      "orden": 1,
+      "tokens_estimados": 95,
+      "contenido": "Para lograr un déficit calórico sostenible sin pérdida muscular se sugiere restar 300 a 500 kcal al gasto energético diario total. Cada gramo de proteína y carbohidrato aporta 4 kcal y cada gramo de grasa aporta 9 kcal.",
+      "embedding": [0.42, 0.42, 0.42, 0.35, 0.0, 0.0, 0.0, 0.35, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.35, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.35, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    },
+    {
+      "id": "doc-oms-01-chk-2",
+      "documento_id": "doc-oms-01",
+      "documento_nombre": "Guia_Clinica_Calorias_y_Macronutrientes_OMS.pdf",
+      "tenant_id": "tenant-ia2-demo",
+      "pagina": 2,
+      "seccion": "2. Carbohidratos Complejos y Fibra Dietética",
+      "orden": 2,
+      "tokens_estimados": 90,
+      "contenido": "Los carbohidratos deben representar el 45-55% de las calorías diarias, priorizando avena, quinua, arroz integral y legumbres con un aporte de 25 a 35 gramos de fibra al día.",
+      "embedding": [0.35, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.45, 0.0, 0.0, 0.45, 0.45, 0.45, 0.45, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    },
+    {
+      "id": "doc-tabla-02-chk-1",
+      "documento_id": "doc-tabla-02",
+      "documento_nombre": "Tabla_Composicion_Nutricional_Alimentos_2026.pdf",
+      "tenant_id": "tenant-ia2-demo",
+      "pagina": 2,
+      "seccion": "Tabla de Calorías y Carbohidratos por 100g",
+      "orden": 1,
+      "tokens_estimados": 100,
+      "contenido": "Avena en hojuelas (100g): 389 kcal, 66g carbohidratos, 16.9g proteína, 10.6g fibra. Arroz cocido (100g): 130 kcal, 28g carbohidratos. Pechuga de pollo (100g): 165 kcal, 0g carbohidratos, 31g proteína.",
+      "embedding": [0.4, 0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.0, 0.0, 0.4, 0.4, 0.0, 0.4, 0.4, 0.0, 0.0, 0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    }
+  ]
+}
+

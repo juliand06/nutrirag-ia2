@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "consultas": [
+    {
+      "id": "c001",
+      "fecha_utc": "2026-11-16T08:15:00+00:00",
+      "objetivo_id": "obj01",
+      "objetivo_nombre": "Déficit Calórico Saludable",
+      "consulta_original": "Desayuno de avena cocida con claras de huevo y fresas",
+      "categoria": "deficit_calorico",
+      "calorias_estimadas": 380,
+      "carbohidratos_g": 45,
+      "proteinas_g": 28,
+      "grasas_g": 8,
+      "respuesta_rag": "Excelente desayuno saciante para déficit calórico con alto aporte de fibra soluble y proteína magra.",
+      "cita_documento": "Guia_Clinica_Calorias_y_Macronutrientes_OMS.pdf (Pág. 1)",
+      "modelo": "gemini/gemini-flash-latest",
+      "version_prompt": "1.0"
+    },
+    {
+      "id": "c002",
+      "fecha_utc": "2026-11-16T12:30:00+00:00",
+      "objetivo_id": "obj02",
+      "objetivo_nombre": "Control Glucémico y Carbohidratos",
+      "consulta_original": "Almuerzo de salmón al horno con quinua y brócoli al vapor",
+      "categoria": "control_carbohidratos",
+      "calorias_estimadas": 585,
+      "carbohidratos_g": 38,
+      "proteinas_g": 42,
+      "grasas_g": 28,
+      "respuesta_rag": "Los 38g de carbohidratos de bajo índice glucémico provenientes de la quinua y el brócoli evitan picos de glucosa.",
+      "cita_documento": "Guia_Clinica_Calorias_y_Macronutrientes_OMS.pdf (Pág. 2)",
+      "modelo": "gemini/gemini-flash-latest",
+      "version_prompt": "1.0"
+    },
+    {
+      "id": "c003",
+      "fecha_utc": "2026-11-16T16:45:00+00:00",
+      "objetivo_id": "obj04",
+      "objetivo_nombre": "Aumento de Masa Muscular (Hipertrofia)",
+      "consulta_original": "Pechuga de pollo de 200g con arroz blanco y aguacate post-entreno",
+      "categoria": "aumento_masa_muscular",
+      "calorias_estimadas": 690,
+      "carbohidratos_g": 64,
+      "proteinas_g": 58,
+      "grasas_g": 18,
+      "respuesta_rag": "Combinación óptima de proteína de alto valor biológico y carbohidratos para reponer glucógeno muscular.",
+      "cita_documento": "Tabla_Composicion_Nutricional_Alimentos_2026.pdf (Pág. 2)",
+      "modelo": "gemini/gemini-flash-latest",
+      "version_prompt": "1.0"
+    },
+    {
+      "id": "c004",
+      "fecha_utc": "2026-11-16T20:10:00+00:00",
+      "objetivo_id": "obj03",
+      "objetivo_nombre": "Recomposición Corporal",
+      "consulta_original": "¿Cuánta agua debo tomar al día y qué cenar para dormir mejor?",
+      "categoria": "bienestar_general",
+      "calorias_estimadas": 450,
+      "carbohidratos_g": 32,
+      "proteinas_g": 36,
+      "grasas_g": 16,
+      "respuesta_rag": "Consume al menos 35 ml de agua por kg de peso y prioriza una cena ligera rica en vegetales y proteína magra.",
+      "cita_documento": "Expediente_Plan_Nutricional_Paciente_IA2.pdf (Pág. 3)",
+      "modelo": "gemini/gemini-flash-latest",
+      "version_prompt": "1.0"
+    }
+  ]
+}
+

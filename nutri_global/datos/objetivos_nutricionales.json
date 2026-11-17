@@ -1,0 +1,13 @@
+{
+  "objetivos": [
+    {"id": "obj01", "nombre": "Déficit Calórico Saludable", "meta_kcal": "1,650 kcal/día"},
+    {"id": "obj02", "nombre": "Control Glucémico y Carbohidratos", "meta_kcal": "1,850 kcal/día"},
+    {"id": "obj03", "nombre": "Recomposición Corporal", "meta_kcal": "2,000 kcal/día"},
+    {"id": "obj04", "nombre": "Aumento de Masa Muscular (Hipertrofia)", "meta_kcal": "2,500 kcal/día"},
+    {"id": "obj05", "nombre": "Alimentación Vegetariana Equilibrada", "meta_kcal": "1,950 kcal/día"},
+    {"id": "obj06", "nombre": "Nutrición Deportiva de Resistencia", "meta_kcal": "2,700 kcal/día"},
+    {"id": "obj07", "nombre": "Salud Digestiva y Alta Fibra", "meta_kcal": "1,900 kcal/día"},
+    {"id": "obj08", "nombre": "Dieta Mediterránea Cardioprotectora", "meta_kcal": "2,050 kcal/día"}
+  ]
+}
+
