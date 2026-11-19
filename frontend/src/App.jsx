@@ -28,6 +28,11 @@ import {
   generateDailyMenuFromDatabase
 } from './services/foodDatabase';
 import {
+  computeAiProgressIntelligence,
+  evaluateDailyMealsWithAi,
+  buildSmartShoppingList
+} from './services/aiWorkflowEngine';
+import {
   GOAL_OPTIONS,
   getTodayIso,
   loadUsers,
@@ -154,6 +159,7 @@ export default function App() {
   const [foodPortionById, setFoodPortionById] = useState({});
   const [selectedDietPreset, setSelectedDietPreset] = useState('equilibrada');
   const [generatedMenu, setGeneratedMenu] = useState(null);
+  const [showShoppingList, setShowShoppingList] = useState(false);
   const [customImagePreview, setCustomImagePreview] = useState(null);
   const [customMealNote, setCustomMealNote] = useState('');
   const [mealType, setMealType] = useState('Almuerzo');
@@ -1290,6 +1296,16 @@ export default function App() {
     userProfile: currentUser,
     clinicalRecord
   });
+  const aiProgress = computeAiProgressIntelligence({
+    userProfile: currentUser,
+    workspace,
+    dailyTracking: { consumedKcal, consumedProtein }
+  });
+  const liveMealAiFeedback = evaluateDailyMealsWithAi({
+    mealsToday,
+    userProfile: currentUser,
+    clinicalRecord
+  });
 
   return (
     <div className="workspace-layout">
@@ -1616,6 +1632,13 @@ export default function App() {
                       </select>
                       <button
                         type="button"
+                        className="btn-outline"
+                        onClick={() => setShowShoppingList(prev => !prev)}
+                      >
+                        {showShoppingList ? 'Ocultar lista de mercado' : 'Lista de mercado IA (7 días)'}
+                      </button>
+                      <button
+                        type="button"
                         className="btn-solid"
                         onClick={() =>
                           setGeneratedMenu(
@@ -1654,6 +1677,37 @@ export default function App() {
                       </div>
                     ))}
                   </div>
+
+                  {showShoppingList && (() => {
+                    const shop = buildSmartShoppingList(
+                      activeMenu,
+                      processCoach.country.name,
+                      processCoach.budget.id
+                    );
+                    return (
+                      <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                          <strong style={{ fontSize: '0.88rem' }}>
+                            Lista de Mercado Semanal Inteligente — {shop.countryName} (Presupuesto: {shop.budgetId})
+                          </strong>
+                          <span className="tag-pill">Calculada para 7 días · 0 tokens LLM</span>
+                        </div>
+                        <div className="split-grid">
+                          {shop.aisles.map(group => (
+                            <div key={group.aisle} className="list-item-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '6px' }}>
+                              <strong style={{ fontSize: '0.8rem', color: 'var(--accent)' }}>{group.aisle}</strong>
+                              {group.items.map(it => (
+                                <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.77rem' }}>
+                                  <span>{it.name} (Nutri-Score {it.nutriGrade})</span>
+                                  <strong>{it.qtyLabel}</strong>
+                                </div>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })()}
@@ -1768,6 +1822,42 @@ export default function App() {
                       </div>
                     ))}
                   </div>
+                </div>
+              </div>
+
+              {/* EVOLUCIÓN SEMANAL 7 DÍAS + RACHA + PRONÓSTICO CORPORAL IA A 30 DÍAS */}
+              <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
+                  <div>
+                    <strong style={{ fontSize: '0.85rem' }}>{aiProgress.forecastTitle}</strong>
+                    <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                      {aiProgress.forecastDetail}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <span className="tag-pill">Racha: {aiProgress.streakDays} día(s)</span>
+                    <span className="tag-pill">Consistencia 7d: {aiProgress.consistencyPct}%</span>
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px', alignItems: 'end', height: '74px', paddingTop: '8px' }}>
+                  {aiProgress.last7Days.map(day => (
+                    <div key={day.iso} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                      <div
+                        title={`${day.iso}: ${day.kcal} kcal (${day.protein}g proteína)`}
+                        style={{
+                          width: '100%',
+                          maxWidth: '34px',
+                          height: `${Math.max(8, Math.round((Math.min(100, day.pct) / 100) * 44))}px`,
+                          borderRadius: '6px',
+                          background: day.kcal > 0 ? 'var(--accent-gradient)' : 'var(--bg-subtle)',
+                          border: day.isToday ? '1px solid var(--accent)' : '1px solid var(--border)'
+                        }}
+                      />
+                      <span style={{ fontSize: '0.7rem', color: day.isToday ? 'var(--accent)' : 'var(--text-muted)', fontWeight: day.isToday ? 600 : 400 }}>
+                        {day.dayLabel}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -2063,9 +2153,32 @@ export default function App() {
               <div>
                 <h1 className="page-title">Registro de comidas</h1>
                 <p className="page-subtitle">
-                  Analiza una fotografía de tu plato o ingresa los datos manualmente para sumarlos a tu seguimiento.
+                  Analiza una fotografía, busca en la base nutricional (Yuka/Cronometer) o ingresa datos manuales con evaluación IA en vivo.
                 </p>
               </div>
+            </div>
+
+            {/* EVALUACIÓN IA EN VIVO DE TUS COMIDAS + SMART SWAPS (0 TOKENS LLM) */}
+            <div
+              className="card"
+              style={{
+                marginBottom: '18px',
+                borderLeft: `4px solid ${liveMealAiFeedback.status === 'warning' ? 'var(--danger-text)' : 'var(--accent)'}`,
+                padding: '14px 18px'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                <strong style={{ fontSize: '0.86rem' }}>{liveMealAiFeedback.headline}</strong>
+                <span className="tag-pill">IA Integrada en Seguimiento · Tiempo real</span>
+              </div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                {liveMealAiFeedback.feedback}
+              </div>
+              {liveMealAiFeedback.smartSwap && (
+                <div style={{ marginTop: '8px', fontSize: '0.78rem', color: 'var(--accent)', fontWeight: 500 }}>
+                  Sustitución inteligente sugerida (Smart Swap): cambia por <strong>{liveMealAiFeedback.smartSwap.to}</strong> — {liveMealAiFeedback.smartSwap.benefit}
+                </div>
+              )}
             </div>
 
             <div className="split-grid">
