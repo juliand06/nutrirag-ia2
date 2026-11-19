@@ -548,112 +548,46 @@ export async function runHybridRagQuery(
   // Ahorro estimado frente a enviar historial crudo + documentos completos sin compresión (~2400 tokens)
   const rawUncompressedEstimate = 2400;
 
-  if (withinDailyBudget && aiConfig.provider === 'OPENAI' && aiConfig.openAiKey?.trim()) {
+  // SEGURIDAD: Nunca se envían ni exponen claves de API (Gemini/OpenAI) desde el navegador.
+  // Si existe un backend proxy seguro configurado, se consulta ahí con timeout corto; si no, responde el motor RAG local.
+  if (withinDailyBudget && aiConfig?.backendUrl) {
     try {
-      const userPrompt = `${compactProfileSummary}\n\nReferencias RAG:\n${compactContextText}\n\nConsulta: ${question}`;
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1800);
+      const res = await fetch(`${aiConfig.backendUrl.replace(/\/$/, '')}/rag/query`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${aiConfig.openAiKey.trim()}`
+          'X-Tenant-Id': userProfile?.id || 'tenant-ia2-demo'
         },
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          max_tokens: TOKEN_GOVERNANCE.MAX_OUTPUT_TOKENS,
-          messages: [
-            {
-              role: 'system',
-              content:
-                'Eres un nutricionista clínico profesional, cercano y conciso. Responde en español en viñetas cortas con calorías, gramos y guía práctica personalizada.'
-            },
-            {
-              role: 'user',
-              content: userPrompt
-            }
-          ],
-          temperature: 0.3
-        })
+          question,
+          tenantId: userProfile?.id || 'tenant-ia2-demo',
+          compactContext: `${compactProfileSummary}\n\n${compactContextText}`
+        }),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
       if (res.ok) {
         const data = await res.json();
-        const answer = data.choices[0].message.content;
-        const tokensUsed =
-          data.usage?.total_tokens || estimateTokens(userPrompt) + estimateTokens(answer);
-        const resultObj = {
-          guardrailTriggered: false,
-          answer,
-          citations: userCitations,
-          tokenMetrics: {
-            tokensUsed,
-            tokensSaved: Math.max(0, rawUncompressedEstimate - tokensUsed),
-            mode: 'openai-comprimido'
-          }
-        };
-        QUERY_RESPONSE_CACHE.set(cacheKey, resultObj);
-        return resultObj;
-      }
-    } catch {
-      // Continúa al respaldo
-    }
-  }
-
-  if (withinDailyBudget && aiConfig.provider === 'GEMINI' && aiConfig.geminiKey?.trim()) {
-    try {
-      const promptText = `Actúa como nutricionista clínico en NutriStudio (sé claro y conciso).
-${compactProfileSummary}
-
-Referencias RAG:
-${compactContextText}
-
-Instrucciones: Si no es tema de nutrición, redirige con calma. Si lo es, responde en español en viñetas cortas con gramos, calorías y guía para el proceso de hoy.
-
-Consulta: ${question}`;
-
-      const modelsToTry = ['gemini-flash-lite-latest', 'gemini-2.5-flash-lite', 'gemini-flash-latest'];
-      for (const modelName of modelsToTry) {
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${aiConfig.geminiKey.trim()}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              generationConfig: {
-                maxOutputTokens: TOKEN_GOVERNANCE.MAX_OUTPUT_TOKENS,
-                temperature: 0.3
-              },
-              contents: [
-                {
-                  parts: [{ text: promptText }]
-                }
-              ]
-            })
-          }
-        );
-        if (res.ok) {
-          const data = await res.json();
-          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (text) {
-            const answer = text.trim();
-            const tokensUsed =
-              data?.usageMetadata?.totalTokenCount ||
-              estimateTokens(promptText) + estimateTokens(answer);
-            const resultObj = {
-              guardrailTriggered: false,
-              answer,
-              citations: userCitations,
-              tokenMetrics: {
-                tokensUsed,
-                tokensSaved: Math.max(0, rawUncompressedEstimate - tokensUsed),
-                mode: 'gemini-comprimido'
-              }
-            };
-            QUERY_RESPONSE_CACHE.set(cacheKey, resultObj);
-            return resultObj;
-          }
+        if (data?.answer) {
+          const tokensUsed = estimateTokens(compactProfileSummary) + estimateTokens(data.answer);
+          const resultObj = {
+            guardrailTriggered: Boolean(data.guardrailTriggered),
+            answer: data.answer,
+            citations: Array.isArray(data.citations) && data.citations.length > 0 ? data.citations : userCitations,
+            tokenMetrics: {
+              tokensUsed,
+              tokensSaved: Math.max(0, rawUncompressedEstimate - tokensUsed),
+              mode: 'backend-rag-seguro'
+            }
+          };
+          QUERY_RESPONSE_CACHE.set(cacheKey, resultObj);
+          return resultObj;
         }
       }
     } catch {
-      // Continúa a síntesis local inteligente
+      // Respaldo transparente al motor RAG local si el backend no está activo
     }
   }
 

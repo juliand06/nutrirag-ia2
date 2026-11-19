@@ -77,21 +77,70 @@ export function setCurrentSessionUser(userId) {
   }
 }
 
-export function authenticateUser(email, password) {
+async function hashPasswordWithSalt(password, salt) {
+  const input = `${salt}:${password}`;
+  return computeRealSha256(input);
+}
+
+function generateSalt() {
+  try {
+    const bytes = new Uint8Array(12);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
+}
+
+function sanitizeUserForSession(user) {
+  if (!user) return null;
+  const { password: _legacy, ...safe } = user;
+  return safe;
+}
+
+export async function authenticateUser(email, password) {
   const cleanEmail = (email || '').trim().toLowerCase();
   const users = loadUsers();
-  const found = users.find(u => u.email.toLowerCase() === cleanEmail);
-  if (!found) {
+  const idx = users.findIndex(u => u.email.toLowerCase() === cleanEmail);
+  if (idx === -1) {
     throw new Error('No existe una cuenta registrada con ese correo electrónico.');
   }
-  if (found.password !== password) {
+  const found = users[idx];
+
+  // Migración transparente de cuentas heredadas sin almacenar contraseña en texto plano
+  if (found.password && !found.passwordHash) {
+    if (found.password !== password) {
+      throw new Error('La contraseña ingresada es incorrecta.');
+    }
+    const salt = generateSalt();
+    const passwordHash = await hashPasswordWithSalt(password, salt);
+    const migrated = { ...found, passwordSalt: salt, passwordHash };
+    delete migrated.password;
+    users[idx] = migrated;
+    saveUsers(users);
+    setCurrentSessionUser(migrated.id);
+    return sanitizeUserForSession(migrated);
+  }
+
+  const candidateHash = await hashPasswordWithSalt(password, found.passwordSalt || '');
+  if (candidateHash !== found.passwordHash) {
     throw new Error('La contraseña ingresada es incorrecta.');
   }
   setCurrentSessionUser(found.id);
-  return found;
+  return sanitizeUserForSession(found);
 }
 
-export function registerNewUser({
+export function loginQuickAccount(userId) {
+  const users = loadUsers();
+  const found = users.find(u => u.id === userId);
+  if (!found) {
+    throw new Error('La cuenta seleccionada no se encuentra disponible.');
+  }
+  setCurrentSessionUser(found.id);
+  return sanitizeUserForSession(found);
+}
+
+export async function registerNewUser({
   name,
   email,
   password,
@@ -141,11 +190,15 @@ export function registerNewUser({
         })
       : null;
 
+  const passwordSalt = generateSalt();
+  const passwordHash = await hashPasswordWithSalt(password, passwordSalt);
+
   const newUser = {
     id: 'usr-' + Math.random().toString(36).substring(2, 10),
     name: cleanName,
     email: cleanEmail,
-    password,
+    passwordSalt,
+    passwordHash,
     profileConfigured: Boolean(computed),
     goal: computed ? goal : '',
     weightKg: w,
@@ -183,7 +236,7 @@ export function registerNewUser({
       ]
     });
   }
-  return newUser;
+  return sanitizeUserForSession(newUser);
 }
 
 export function calculateRecommendedTargets({

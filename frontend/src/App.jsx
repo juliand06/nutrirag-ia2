@@ -41,6 +41,7 @@ import {
   getCurrentSessionUser,
   setCurrentSessionUser,
   authenticateUser,
+  loginQuickAccount,
   registerNewUser,
   calculateRecommendedTargets,
   updateUserProfile,
@@ -48,84 +49,18 @@ import {
   saveUserWorkspace,
   computeRealSha256
 } from './services/userStorage';
-
-// Renderizador limpio de texto con soporte de encabezados (#), negritas (**texto**) y listas
-function renderFormattedText(rawText) {
-  if (!rawText) return null;
-  const lines = String(rawText).split('\n');
-  return lines.map((line, lineIdx) => {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      return <div key={lineIdx} style={{ height: '8px' }} />;
-    }
-    const isHeading = /^#{1,4}\s+/.test(trimmed);
-    const isBullet = /^[-*•]\s+/.test(trimmed);
-    const cleanLine = isHeading
-      ? trimmed.replace(/^#{1,4}\s+/, '')
-      : isBullet
-        ? trimmed.replace(/^[-*•]\s+/, '')
-        : line;
-
-    const parts = cleanLine.split(/(\*\*[^*]+\*\*)/g);
-    const renderedParts = parts.map((part, pIdx) => {
-      if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
-        return <strong key={pIdx}>{part.slice(2, -2)}</strong>;
-      }
-      return <span key={pIdx}>{part}</span>;
-    });
-
-    if (isHeading) {
-      return (
-        <div
-          key={lineIdx}
-          style={{
-            fontWeight: 600,
-            fontSize: '0.94rem',
-            marginTop: lineIdx > 0 ? '10px' : 0,
-            marginBottom: '4px'
-          }}
-        >
-          {renderedParts}
-        </div>
-      );
-    }
-
-    if (isBullet) {
-      return (
-        <div
-          key={lineIdx}
-          style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: '8px',
-            paddingLeft: '4px',
-            marginTop: '4px'
-          }}
-        >
-          <span style={{ color: 'var(--accent)', fontWeight: 700 }}>•</span>
-          <span>{renderedParts}</span>
-        </div>
-      );
-    }
-
-    return (
-      <div key={lineIdx} style={{ marginTop: lineIdx > 0 ? '4px' : 0 }}>
-        {renderedParts}
-      </div>
-    );
-  });
-}
+import HealthDisclaimer from './components/HealthDisclaimer';
+import { renderFormattedText } from './components/FormattedText';
+import LandingPage from './components/LandingPage';
+import AuthOnboarding from './components/AuthOnboarding';
+import SidebarNav from './components/SidebarNav';
+import CopilotDrawer from './components/CopilotDrawer';
+import HealthProgressSection from './components/HealthProgressSection';
 
 export default function App() {
-  const envGemini = (import.meta.env.VITE_GEMINI_API_KEY || '').trim();
-  const envOpenAi = (import.meta.env.VITE_OPENAI_API_KEY || '').trim();
-  const validGemini = envGemini && envGemini !== 'TU_API_KEY_AQUI' ? envGemini : '';
-  const validOpenAi = envOpenAi && envOpenAi !== 'TU_API_KEY_AQUI' ? envOpenAi : '';
-
+  // SEGURIDAD: Ninguna clave de API se expone en el navegador; el backend proxy maneja las llamadas LLM si está activo.
   const [aiConfig] = useState({
-    provider: validGemini ? 'GEMINI' : validOpenAi ? 'OPENAI' : 'DEMO',
-    openAiKey: validOpenAi,
-    geminiKey: validGemini
+    backendUrl: (import.meta.env.VITE_API_BASE_URL || '').trim()
   });
 
   // Tema visual (Claro Editorial / Modo Oscuro Clínico estilo MacroFactor)
@@ -278,11 +213,11 @@ export default function App() {
   // ============================================================================
   // MANEJADORES DE AUTENTICACIÓN
   // ============================================================================
-  const handleLoginSubmit = (e) => {
+  const handleLoginSubmit = async (e) => {
     e.preventDefault();
     setAuthError('');
     try {
-      const user = authenticateUser(loginEmail, loginPassword);
+      const user = await authenticateUser(loginEmail, loginPassword);
       setCurrentUser(user);
       setActiveSection('summary');
     } catch (err) {
@@ -290,11 +225,11 @@ export default function App() {
     }
   };
 
-  const handleRegisterSubmit = (e) => {
+  const handleRegisterSubmit = async (e) => {
     e.preventDefault();
     setAuthError('');
     try {
-      const user = registerNewUser({
+      const user = await registerNewUser({
         name: regName,
         email: regEmail,
         password: regPassword,
@@ -317,10 +252,10 @@ export default function App() {
     }
   };
 
-  const handleQuickLogin = (email, password) => {
+  const handleQuickLogin = (userId) => {
     setAuthError('');
     try {
-      const user = authenticateUser(email, password);
+      const user = loginQuickAccount(userId);
       setCurrentUser(user);
       setActiveSection('summary');
     } catch (err) {
@@ -553,61 +488,38 @@ export default function App() {
 
       const lowerName = (file.name + ' ' + customMealNote).toLowerCase();
 
-      if (aiConfig.provider === 'GEMINI' && aiConfig.geminiKey?.trim() && typeof dataUrl === 'string') {
+      if (aiConfig.backendUrl) {
         try {
-          const base64Data = dataUrl.split(',')[1];
-          const mimeType = file.type || 'image/jpeg';
-          const modelsToTry = ['gemini-flash-lite-latest', 'gemini-2.5-flash-lite', 'gemini-flash-latest'];
-          for (const modelName of modelsToTry) {
-            const res = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${aiConfig.geminiKey.trim()}`,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  contents: [
-                    {
-                      parts: [
-                        {
-                          text: `Analiza esta imagen para el registro nutricional personal de ${currentUser.name}. Nota: "${customMealNote || file.name}". Devuelve ÚNICAMENTE un JSON válido sin markdown con esta estructura: {"isFoodValid": true o false (false si NO es comida ni bebida), "dishName": "nombre claro del plato", "totalCalories": int, "carbsGrams": int, "proteinGrams": int, "fatGrams": int, "fiberGrams": int, "glycemicLoad": "Baja/Media/Alta", "ingredients": [{"name": "ingrediente y porción", "calories": int, "carbsGrams": int, "proteinGrams": int, "fatGrams": int}], "nutritionalAdvice": "observación nutricional clara y tranquila en español (si isFoodValid es false, invita con calma a subir una foto de comida)"}`
-                        },
-                        {
-                          inline_data: {
-                            mime_type: mimeType,
-                            data: base64Data
-                          }
-                        }
-                      ]
-                    }
-                  ]
-                })
-              }
-            );
-            if (res.ok) {
-              const data = await res.json();
-              const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-              const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-              if (jsonMatch) {
-                const parsed = JSON.parse(jsonMatch[0]);
-                setIsAnalyzingImage(false);
-                setActiveVisionResult({
-                  isFoodValid: Boolean(parsed.isFoodValid),
-                  dishName: parsed.dishName || file.name,
-                  totalCalories: Number(parsed.totalCalories || 0),
-                  carbsGrams: Number(parsed.carbsGrams || 0),
-                  proteinGrams: Number(parsed.proteinGrams || 0),
-                  fatGrams: Number(parsed.fatGrams || 0),
-                  fiberGrams: Number(parsed.fiberGrams || 0),
-                  glycemicLoad: parsed.glycemicLoad || 'Media',
-                  ingredients: Array.isArray(parsed.ingredients) ? parsed.ingredients : [],
-                  nutritionalAdvice: parsed.nutritionalAdvice || 'Análisis completado.'
-                });
-                return;
-              }
-            }
+          const formData = new FormData();
+          formData.append('file', file);
+          formData.append('note', customMealNote || '');
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 2200);
+          const res = await fetch(`${aiConfig.backendUrl.replace(/\/$/, '')}/vision/analyze`, {
+            method: 'POST',
+            body: formData,
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          if (res.ok) {
+            const parsed = await res.json();
+            setIsAnalyzingImage(false);
+            setActiveVisionResult({
+              isFoodValid: Boolean(parsed.isFoodValid),
+              dishName: parsed.dishName || file.name,
+              totalCalories: Number(parsed.totalCalories || 0),
+              carbsGrams: Number(parsed.carbsGrams || 0),
+              proteinGrams: Number(parsed.proteinGrams || 0),
+              fatGrams: Number(parsed.fatGrams || 0),
+              fiberGrams: Number(parsed.fiberGrams || 0),
+              glycemicLoad: parsed.glycemicLoad || 'Media',
+              ingredients: Array.isArray(parsed.ingredients) ? parsed.ingredients : [],
+              nutritionalAdvice: parsed.nutritionalAdvice || 'Análisis completado.'
+            });
+            return;
           }
         } catch {
-          // Respaldo local si no hay red
+          // Respaldo local si el backend no está disponible
         }
       }
 
@@ -1151,699 +1063,68 @@ export default function App() {
   };
 
   // ============================================================================
-  // VISTA 0: PORTADA PROFESIONAL DE NUTRICIÓN + LOGIN / ONBOARDING EN 3 PASOS
-  // ============================================================================
+  // VISTA 0: PORTADA EDITORIAL + LOGIN / ONBOARDING BIOMÉTRICO EN 3 PASOS
   if (!currentUser || !workspace) {
     if (showLanding) {
       return (
-        <div className="landing-page">
-          <header className="landing-nav">
-            <div className="auth-brand" style={{ marginBottom: 0 }}>
-              <img
-                src="/nutristudio-logo.svg"
-                alt="Logo NutriStudio AI"
-                style={{ width: '34px', height: '34px', borderRadius: '9px' }}
-              />
-              <span className="auth-brand-name" style={{ fontSize: '1.12rem' }}>
-                NutriStudio AI
-              </span>
-            </div>
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-              <button
-                type="button"
-                className="btn-outline"
-                onClick={() => {
-                  setAuthMode('login');
-                  setShowLanding(false);
-                }}
-              >
-                Iniciar sesión
-              </button>
-              <button
-                type="button"
-                className="btn-solid"
-                onClick={() => {
-                  setAuthMode('register');
-                  setRegStep(1);
-                  setShowLanding(false);
-                }}
-              >
-                Comenzar gratis
-              </button>
-            </div>
-          </header>
-
-          <section className="landing-hero">
-            <div>
-              <span className="tag-pill">
-                Plataforma Clínica de Nutrición · IA + Medicina Global + Productividad Local
-              </span>
-              <h1 className="landing-hero-heading">
-                Nutre tu cuerpo con <span>ciencia e inteligencia</span>, no con dietas imposibles.
-              </h1>
-              <p className="landing-hero-lead">
-                “El verdadero cambio comienza cuando entiendes tu metabolismo, aprovechas los alimentos reales de tu país y cuentas con una IA clínica que te acompaña en cada comida.”
-              </p>
-              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  className="btn-solid"
-                  style={{ padding: '12px 22px', fontSize: '0.92rem' }}
-                  onClick={() => {
-                    setAuthMode('register');
-                    setRegStep(1);
-                    setShowLanding(false);
-                  }}
-                >
-                  Empezar mi plan personalizado →
-                </button>
-                <button
-                  type="button"
-                  className="btn-outline"
-                  style={{ padding: '12px 20px', fontSize: '0.92rem' }}
-                  onClick={() => {
-                    setAuthMode('login');
-                    setShowLanding(false);
-                  }}
-                >
-                  Ya tengo cuenta
-                </button>
-              </div>
-              <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', marginTop: '22px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                <span>✓ Anillo calórico y macros</span>
-                <span>✓ Escáner de platos y Nutri-Score A–E</span>
-                <span>✓ Protocolos OMS · ADA · DASH · ESPEN</span>
-              </div>
-            </div>
-
-            <div className="landing-hero-img-wrap">
-              <img src="/hero-nutrition.jpg" alt="Alimentación saludable balanceada en NutriStudio AI" />
-              <div className="landing-floating-stat">
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-primary)' }}>
-                    Seguimiento inteligente 360°
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                    Calorías · Micronutrientes · Pronóstico corporal IA a 30 días
-                  </div>
-                </div>
-                <span className="nutri-badge nutri-grade-A">Nutri-Score A</span>
-              </div>
-            </div>
-          </section>
-
-          <section className="landing-metrics-strip">
-            <div className="landing-metric-pill">
-              <div className="landing-metric-num">40+</div>
-              <div className="landing-metric-label">Alimentos reales con puntaje de calidad A–E</div>
-            </div>
-            <div className="landing-metric-pill">
-              <div className="landing-metric-num">8 Países</div>
-              <div className="landing-metric-label">Planes con alimentos locales y a tu alcance</div>
-            </div>
-            <div className="landing-metric-pill">
-              <div className="landing-metric-num">100%</div>
-              <div className="landing-metric-label">Respaldado en medicina nutricional clínica</div>
-            </div>
-            <div className="landing-metric-pill">
-              <div className="landing-metric-num">24/7</div>
-              <div className="landing-metric-label">Asistente inteligente que te acompaña hoy</div>
-            </div>
-          </section>
-
-          <section className="landing-section">
-            <div style={{ textAlign: 'center', maxWidth: '680px', margin: '0 auto' }}>
-              <span className="tag-pill">Diseñada para acompañarte todos los días</span>
-              <h2 style={{ fontSize: '1.65rem', fontWeight: 700, marginTop: '10px', letterSpacing: '-0.025em' }}>
-                Todo lo que tu salud necesita, en una sola plataforma
-              </h2>
-              <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginTop: '6px' }}>
-                Inspirada en los mejores estándares internacionales de nutrición y potenciada con IA clínica personalizada.
-              </p>
-            </div>
-
-            <div className="landing-cards-grid">
-              <article className="landing-visual-card">
-                <img src="/landing-meal-scan.jpg" alt="Escaneo inteligente de platos con Visión IA" />
-                <div className="landing-visual-card-body">
-                  <span className="nutri-badge nutri-grade-A" style={{ alignSelf: 'flex-start' }}>
-                    Visión IA + Yuka
-                  </span>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>
-                    “Una foto basta para conocer tus calorías, macros y calidad real.”
-                  </h3>
-                  <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                    Analiza tus platos al instante, compara en nuestra base de 40+ alimentos con Nutri-Score A–E y recibe sustituciones saludables en tiempo real.
-                  </p>
-                </div>
-              </article>
-
-              <article className="landing-visual-card">
-                <img src="/landing-wellness.jpg" alt="Alimentos reales y productividad alimenticia por país" />
-                <div className="landing-visual-card-body">
-                  <span className="nutri-badge nutri-grade-B" style={{ alignSelf: 'flex-start' }}>
-                    Productividad Local
-                  </span>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>
-                    “Comer saludable no tiene que ser costoso ni lejano a tu cultura.”
-                  </h3>
-                  <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                    Adaptamos menús automáticos y tu lista de mercado semanal a los alimentos más nutritivos y accesibles de tu país y presupuesto.
-                  </p>
-                </div>
-              </article>
-
-              <article className="landing-visual-card">
-                <img src="/hero-nutrition.jpg" alt="Medicina nutricional especializada y sincronización clínica" />
-                <div className="landing-visual-card-body">
-                  <span className="nutri-badge nutri-grade-A" style={{ alignSelf: 'flex-start' }}>
-                    Medicina Clínica · HL7 FHIR
-                  </span>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>
-                    “Una IA que conoce tu cuerpo, tus exámenes y tu progreso.”
-                  </h3>
-                  <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                    Respaldada por guías OMS, ADA, AHA/DASH, ESPEN y KDIGO, con memoria personalizada y sincronización clínica por correo bajo consentimiento.
-                  </p>
-                </div>
-              </article>
-            </div>
-          </section>
-
-          <section className="landing-quote-band">
-            <div className="landing-quote-inner">
-              <div style={{ fontSize: '1.35rem', fontWeight: 700, maxWidth: '720px', margin: '0 auto', lineHeight: 1.35 }}>
-                “No se trata de comer menos, sino de darle a tu metabolismo exactamente lo que necesita hoy.”
-              </div>
-              <p style={{ fontSize: '0.9rem', opacity: 0.9, marginTop: '10px', marginBottom: '22px' }}>
-                Registra tu edad, peso, estatura y objetivo en 3 pasos rápidos y activa tu Copiloto IA ahora mismo.
-              </p>
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  className="btn-outline"
-                  style={{ background: '#ffffff', color: '#0f6b56', borderColor: '#ffffff', fontWeight: 600, padding: '11px 22px' }}
-                  onClick={() => {
-                    setAuthMode('register');
-                    setRegStep(1);
-                    setShowLanding(false);
-                  }}
-                >
-                  Crear mi cuenta en 3 pasos →
-                </button>
-                <button
-                  type="button"
-                  className="btn-outline"
-                  style={{ background: 'rgba(255,255,255,0.14)', color: '#ffffff', borderColor: 'rgba(255,255,255,0.4)', padding: '11px 20px' }}
-                  onClick={() => {
-                    setAuthMode('login');
-                    setShowLanding(false);
-                  }}
-                >
-                  Iniciar sesión
-                </button>
-              </div>
-            </div>
-          </section>
-        </div>
+        <LandingPage
+          onOpenLogin={() => {
+            setAuthMode('login');
+            setShowLanding(false);
+          }}
+          onOpenRegister={() => {
+            setAuthMode('register');
+            setRegStep(1);
+            setShowLanding(false);
+          }}
+        />
       );
     }
 
-    const existingUsers = loadUsers();
-    const regPreview = calculateRecommendedTargets({
-      weightKg: regWeight,
-      heightCm: regHeight,
-      age: regAge,
-      sex: regSex,
-      metabolismType: regMetabolism,
-      activityLevel: regActivity,
-      goal: regGoal
-    });
-    const regPct = regStep === 1 ? 33 : regStep === 2 ? 66 : 100;
-
     return (
-      <div className="auth-split-wrapper">
-        {/* PANEL IZQUIERDO: IMAGEN EDITORIAL DE NUTRICIÓN + PROPUESTA DE VALOR */}
-        <section
-          className="auth-hero-panel"
-          style={{ backgroundImage: "url('/hero-nutrition.jpg')" }}
-        >
-          <div className="auth-hero-overlay" />
-          <div className="auth-hero-content">
-            <div className="auth-brand" style={{ marginBottom: 0 }}>
-              <div className="auth-mark" style={{ background: '#ffffff', color: '#0f6b56' }}>
-                N
-              </div>
-              <span className="auth-brand-name" style={{ color: '#ffffff', fontSize: '1.15rem' }}>
-                NutriStudio AI
-              </span>
-            </div>
-
-            <div>
-              <span
-                className="tag-pill"
-                style={{
-                  background: 'rgba(255,255,255,0.16)',
-                  color: '#ffffff',
-                  borderColor: 'rgba(255,255,255,0.3)',
-                  marginBottom: '14px'
-                }}
-              >
-                Medicina Nutricional Especializada · OMS · ADA · DASH · ESPEN
-              </span>
-              <h1 className="auth-hero-title">
-                Tu nutrición inteligente, diseñada para tu cuerpo y tu país.
-              </h1>
-              <p className="auth-hero-subtitle">
-                Combina seguimiento visual de calorías, micronutrientes y calidad Yuka con un Agente IA Clínico que conoce tu metabolismo, tus exámenes médicos y los alimentos accesibles de tu país.
-              </p>
-
-              <div className="auth-hero-pills">
-                <div className="auth-hero-feature">
-                  <span>🎯</span>
-                  <span>Anillo calórico, macros, hidratación visual y pronóstico corporal IA a 30 días.</span>
-                </div>
-                <div className="auth-hero-feature">
-                  <span>🩺</span>
-                  <span>Sincronización clínica HL7 FHIR por correo y base médica global (ADA · DASH · KDIGO).</span>
-                </div>
-                <div className="auth-hero-feature">
-                  <span>🥗</span>
-                  <span>Base de 40+ alimentos con Nutri-Score A–E, Menú Automático y Lista de Mercado IA.</span>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ fontSize: '0.76rem', opacity: 0.85 }}>
-              NutriStudio AI · Tu bienestar nutricional, claro, cercano y personalizado cada día.
-            </div>
-          </div>
-        </section>
-
-        {/* PANEL DERECHO: INICIO DE SESIÓN O WIZARD DE BIENVENIDA EN 3 PASOS */}
-        <section className="auth-form-panel">
-          <div className="auth-card-wide">
-            <button
-              type="button"
-              className="btn-ghost"
-              style={{ padding: '4px 0', marginBottom: '10px', fontSize: '0.78rem' }}
-              onClick={() => setShowLanding(true)}
-            >
-              ← Volver a la portada
-            </button>
-            <h2 className="auth-title">
-              {authMode === 'login' ? 'Bienvenido de nuevo' : 'Personalicemos tu plan nutricional'}
-            </h2>
-            <p className="auth-subtitle">
-              {authMode === 'login'
-                ? 'Inicia sesión para continuar tu seguimiento y tu acompañamiento con IA.'
-                : 'Cuéntanos sobre tu cuerpo, edad, país y objetivo para que tu IA te guíe desde el primer segundo.'}
-            </p>
-
-            <div className="auth-switcher">
-              <button
-                type="button"
-                className={`auth-switch-btn ${authMode === 'login' ? 'active' : ''}`}
-                onClick={() => {
-                  setAuthMode('login');
-                  setAuthError('');
-                }}
-              >
-                Iniciar sesión
-              </button>
-              <button
-                type="button"
-                className={`auth-switch-btn ${authMode === 'register' ? 'active' : ''}`}
-                onClick={() => {
-                  setAuthMode('register');
-                  setRegStep(1);
-                  setAuthError('');
-                }}
-              >
-                Crear cuenta (3 pasos)
-              </button>
-            </div>
-
-            {authError && <div className="error-banner">{authError}</div>}
-
-            {authMode === 'login' ? (
-              <form onSubmit={handleLoginSubmit} className="form-stack">
-                <div className="field-group">
-                  <label className="field-label">Correo electrónico (Gmail / Personal)</label>
-                  <input
-                    type="email"
-                    className="input-clean"
-                    placeholder="nombre@gmail.com"
-                    value={loginEmail}
-                    onChange={e => setLoginEmail(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="field-group">
-                  <label className="field-label">Contraseña</label>
-                  <input
-                    type="password"
-                    className="input-clean"
-                    placeholder="••••••••"
-                    value={loginPassword}
-                    onChange={e => setLoginPassword(e.target.value)}
-                    required
-                  />
-                </div>
-                <button type="submit" className="btn-solid" style={{ marginTop: '6px' }}>
-                  Entrar a mi espacio nutricional
-                </button>
-              </form>
-            ) : (
-              <form onSubmit={handleRegisterSubmit} className="form-stack">
-                <div className="onboarding-progress-wrap">
-                  <div className="onboarding-progress-head">
-                    <span>
-                      Paso {regStep} de 3 ·{' '}
-                      {regStep === 1
-                        ? 'Tu cuenta y país'
-                        : regStep === 2
-                          ? 'Tu cuerpo, edad y metabolismo'
-                          : 'Objetivo y enfoque médico'}
-                    </span>
-                    <span>{regPct}%</span>
-                  </div>
-                  <div className="progress-track">
-                    <div className="progress-fill" style={{ width: `${regPct}%` }} />
-                  </div>
-                </div>
-
-                {regStep === 1 && (
-                  <>
-                    <div className="field-group">
-                      <label className="field-label">Nombre completo</label>
-                      <input
-                        type="text"
-                        className="input-clean"
-                        placeholder="Ej. Camilo Restrepo"
-                        value={regName}
-                        onChange={e => setRegName(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div className="field-group">
-                      <label className="field-label">Correo electrónico (el mismo de tu clínica si deseas sincronizar)</label>
-                      <input
-                        type="email"
-                        className="input-clean"
-                        placeholder="camilo@gmail.com"
-                        value={regEmail}
-                        onChange={e => setRegEmail(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div className="field-group">
-                      <label className="field-label">Contraseña</label>
-                      <input
-                        type="password"
-                        className="input-clean"
-                        placeholder="Mínimo 4 caracteres"
-                        value={regPassword}
-                        onChange={e => setRegPassword(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div className="field-row">
-                      <div className="field-group">
-                        <label className="field-label">País (alimentos locales)</label>
-                        <select
-                          className="input-clean"
-                          value={regCountry}
-                          onChange={e => setRegCountry(e.target.value)}
-                        >
-                          {COUNTRY_OPTIONS.map(c => (
-                            <option key={c.id} value={c.id}>
-                              {c.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="field-group">
-                        <label className="field-label">Presupuesto alimenticio</label>
-                        <select
-                          className="input-clean"
-                          value={regBudget}
-                          onChange={e => setRegBudget(e.target.value)}
-                        >
-                          {BUDGET_OPTIONS.map(b => (
-                            <option key={b.id} value={b.id}>
-                              {b.id.charAt(0).toUpperCase() + b.id.slice(1)}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      className="btn-solid"
-                      style={{ marginTop: '6px' }}
-                      onClick={() => {
-                        setAuthError('');
-                        if (regName.trim().length < 2 || !regEmail.includes('@') || regPassword.length < 4) {
-                          setAuthError('Completa tu nombre, correo válido y contraseña (mínimo 4 caracteres) para continuar.');
-                          return;
-                        }
-                        setRegStep(2);
-                      }}
-                    >
-                      Siguiente: Datos de mi cuerpo →
-                    </button>
-                  </>
-                )}
-
-                {regStep === 2 && (
-                  <>
-                    <div className="field-row">
-                      <div className="field-group">
-                        <label className="field-label">Sexo biológico (TMB)</label>
-                        <select
-                          className="input-clean"
-                          value={regSex}
-                          onChange={e => setRegSex(e.target.value)}
-                        >
-                          {SEX_OPTIONS.map(s => (
-                            <option key={s.id} value={s.id}>
-                              {s.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="field-group">
-                        <label className="field-label">Edad (años)</label>
-                        <input
-                          type="number"
-                          min="12"
-                          max="110"
-                          className="input-clean"
-                          placeholder="Ej. 24"
-                          value={regAge}
-                          onChange={e => setRegAge(e.target.value)}
-                          required
-                        />
-                      </div>
-                    </div>
-                    <div className="field-row">
-                      <div className="field-group">
-                        <label className="field-label">Peso actual (kg)</label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          min="30"
-                          max="260"
-                          className="input-clean"
-                          placeholder="Ej. 68"
-                          value={regWeight}
-                          onChange={e => setRegWeight(e.target.value)}
-                          required
-                        />
-                      </div>
-                      <div className="field-group">
-                        <label className="field-label">Estatura (cm)</label>
-                        <input
-                          type="number"
-                          min="110"
-                          max="230"
-                          className="input-clean"
-                          placeholder="Ej. 170"
-                          value={regHeight}
-                          onChange={e => setRegHeight(e.target.value)}
-                          required
-                        />
-                      </div>
-                    </div>
-                    <div className="field-row">
-                      <div className="field-group">
-                        <label className="field-label">Actividad física</label>
-                        <select
-                          className="input-clean"
-                          value={regActivity}
-                          onChange={e => setRegActivity(e.target.value)}
-                        >
-                          <option value="sedentario">Sedentario</option>
-                          <option value="ligero">Ligero (1-3 días/sem)</option>
-                          <option value="moderado">Moderado (3-5 días/sem)</option>
-                          <option value="intenso">Intenso (6-7 días/sem)</option>
-                        </select>
-                      </div>
-                      <div className="field-group">
-                        <label className="field-label">Tipo de metabolismo</label>
-                        <select
-                          className="input-clean"
-                          value={regMetabolism}
-                          onChange={e => setRegMetabolism(e.target.value)}
-                        >
-                          {METABOLISM_OPTIONS.map(m => (
-                            <option key={m.id} value={m.id}>
-                              {m.label.split('(')[0].trim()}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
-                      <button
-                        type="button"
-                        className="btn-outline"
-                        onClick={() => setRegStep(1)}
-                      >
-                        ← Volver
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-solid"
-                        style={{ flex: 1 }}
-                        onClick={() => {
-                          setAuthError('');
-                          if (Number(regAge) <= 0 || Number(regWeight) <= 0 || Number(regHeight) <= 0) {
-                            setAuthError('Ingresa tu edad, peso y estatura para calcular tu metabolismo exacto.');
-                            return;
-                          }
-                          setRegStep(3);
-                        }}
-                      >
-                        Siguiente: Mi objetivo →
-                      </button>
-                    </div>
-                  </>
-                )}
-
-                {regStep === 3 && (
-                  <>
-                    <div className="field-group">
-                      <label className="field-label">¿Cuál es tu objetivo principal?</label>
-                      <select
-                        className="input-clean"
-                        value={regGoal}
-                        onChange={e => setRegGoal(e.target.value)}
-                      >
-                        {GOAL_OPTIONS.map(g => (
-                          <option key={g.id} value={g.id}>
-                            {g.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="field-group">
-                      <label className="field-label">Enfoque médico preventivo (opcional)</label>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '4px' }}>
-                        {MEDICAL_CONDITIONS.slice(0, 6).map(cond => {
-                          const active = regConditions.includes(cond.id);
-                          return (
-                            <button
-                              key={cond.id}
-                              type="button"
-                              className="copilot-chip"
-                              style={
-                                active
-                                  ? { background: 'var(--accent)', color: '#ffffff', borderColor: 'var(--accent)' }
-                                  : undefined
-                              }
-                              onClick={() =>
-                                setRegConditions(prev =>
-                                  prev.includes(cond.id)
-                                    ? prev.filter(id => id !== cond.id)
-                                    : [...prev, cond.id]
-                                )
-                              }
-                            >
-                              {active ? '✓ ' : '+ '}
-                              {cond.label.split('/')[0].trim()}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {regPreview && (
-                      <div className="onboarding-preview-box">
-                        <div style={{ fontWeight: 600, color: 'var(--accent)', marginBottom: '4px' }}>
-                          Plan inicial calculado por IA para tu cuerpo:
-                        </div>
-                        <div>
-                          Meta: <strong>{regPreview.dailyCalories} kcal/día</strong> · Proteína:{' '}
-                          <strong>{regPreview.targetProtein}g</strong> · Carbs:{' '}
-                          <strong>{regPreview.targetCarbs}g</strong> · Grasas:{' '}
-                          <strong>{regPreview.targetFat}g</strong> · Agua:{' '}
-                          <strong>{regPreview.waterGoalMl} ml</strong>
-                        </div>
-                        <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', marginTop: '3px' }}>
-                          TMB: {regPreview.bmr} kcal · GET: {regPreview.tdee} kcal (Mifflin-St Jeor + metabolismo)
-                        </div>
-                      </div>
-                    )}
-
-                    <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
-                      <button
-                        type="button"
-                        className="btn-outline"
-                        onClick={() => setRegStep(2)}
-                      >
-                        ← Volver
-                      </button>
-                      <button type="submit" className="btn-solid" style={{ flex: 1 }}>
-                        Crear cuenta y comenzar ahora
-                      </button>
-                    </div>
-                  </>
-                )}
-              </form>
-            )}
-
-            {existingUsers.length > 0 && (
-              <div className="quick-accounts">
-                <div className="quick-accounts-label">
-                  Cuentas registradas en este navegador (acceso rápido):
-                </div>
-                <div className="quick-account-list">
-                  {existingUsers.map(u => (
-                    <div
-                      key={u.id}
-                      className="quick-account-item"
-                      onClick={() => handleQuickLogin(u.email, u.password)}
-                    >
-                      <div>
-                        <strong style={{ color: 'var(--text-primary)' }}>{u.name}</strong>
-                        <span style={{ color: 'var(--text-muted)', marginLeft: '6px' }}>
-                          ({u.email})
-                        </span>
-                      </div>
-                      <span className="tag-pill">
-                        {u.dailyCalories > 0 ? `${u.dailyCalories} kcal` : 'En 0 (Nueva)'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
-      </div>
+      <AuthOnboarding
+        authMode={authMode}
+        setAuthMode={setAuthMode}
+        authError={authError}
+        setAuthError={setAuthError}
+        onBackToLanding={() => setShowLanding(true)}
+        loginEmail={loginEmail}
+        setLoginEmail={setLoginEmail}
+        loginPassword={loginPassword}
+        setLoginPassword={setLoginPassword}
+        onLoginSubmit={handleLoginSubmit}
+        regStep={regStep}
+        setRegStep={setRegStep}
+        regName={regName}
+        setRegName={setRegName}
+        regEmail={regEmail}
+        setRegEmail={setRegEmail}
+        regPassword={regPassword}
+        setRegPassword={setRegPassword}
+        regCountry={regCountry}
+        setRegCountry={setRegCountry}
+        regBudget={regBudget}
+        setRegBudget={setRegBudget}
+        regSex={regSex}
+        setRegSex={setRegSex}
+        regAge={regAge}
+        setRegAge={setRegAge}
+        regWeight={regWeight}
+        setRegWeight={setRegWeight}
+        regHeight={regHeight}
+        setRegHeight={setRegHeight}
+        regActivity={regActivity}
+        setRegActivity={setRegActivity}
+        regMetabolism={regMetabolism}
+        setRegMetabolism={setRegMetabolism}
+        regGoal={regGoal}
+        setRegGoal={setRegGoal}
+        regConditions={regConditions}
+        setRegConditions={setRegConditions}
+        onRegisterSubmit={handleRegisterSubmit}
+        existingUsers={loadUsers()}
+        onQuickLogin={handleQuickLogin}
+      />
     );
   }
 
@@ -1936,84 +1217,19 @@ export default function App() {
 
   return (
     <div className="workspace-layout">
-      {/* BARRA LATERAL MINIMALISTA */}
-      <aside className="sidebar">
-        <div>
-          <div className="sidebar-brand">
-            <img
-              src="/nutristudio-logo.svg"
-              alt="Logo NutriStudio AI"
-              style={{ width: '34px', height: '34px', borderRadius: '9px' }}
-            />
-            <span className="auth-brand-name">NutriStudio AI</span>
-          </div>
-
-          <nav className="sidebar-nav">
-            <button
-              className={`sidebar-link ${activeSection === 'summary' ? 'active' : ''}`}
-              onClick={() => setActiveSection('summary')}
-            >
-              <span className="sidebar-link-label"><span>📊</span> Seguimiento diario</span>
-            </button>
-            <button
-              className={`sidebar-link ${activeSection === 'meals' ? 'active' : ''}`}
-              onClick={() => setActiveSection('meals')}
-            >
-              <span className="sidebar-link-label"><span>🥗</span> Comidas</span>
-              <span className="sidebar-count">{workspace.mealLogs?.length || 0}</span>
-            </button>
-            <button
-              className={`sidebar-link ${activeSection === 'chat' ? 'active' : ''}`}
-              onClick={() => setActiveSection('chat')}
-            >
-              <span className="sidebar-link-label"><span>💬</span> Asistente Nutricional</span>
-              <span className="sidebar-count">{workspace.conversations?.length || 0}</span>
-            </button>
-            <button
-              className={`sidebar-link ${activeSection === 'documents' ? 'active' : ''}`}
-              onClick={() => setActiveSection('documents')}
-            >
-              <span className="sidebar-link-label"><span>📄</span> Mis planes y guías</span>
-              <span className="sidebar-count">{workspace.documents?.length || 0}</span>
-            </button>
-            <button
-              className={`sidebar-link ${activeSection === 'analytics' ? 'active' : ''}`}
-              onClick={() => setActiveSection('analytics')}
-            >
-              <span className="sidebar-link-label"><span>🩺</span> Mi Salud y Progreso</span>
-              <span className="sidebar-count">{userMemory.knowledgeScore}%</span>
-            </button>
-            <button
-              className={`sidebar-link ${activeSection === 'profile' ? 'active' : ''}`}
-              onClick={() => setActiveSection('profile')}
-            >
-              <span className="sidebar-link-label"><span>⚙️</span> Mi cuenta y metas</span>
-            </button>
-          </nav>
-        </div>
-
-        <div className="sidebar-user">
-          <div className="user-summary">
-            <div className="user-avatar">{userInitials}</div>
-            <div style={{ overflow: 'hidden' }}>
-              <div className="user-name">{currentUser.name}</div>
-              <div className="user-meta">{currentUser.email}</div>
-            </div>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <button
-              type="button"
-              className="btn-outline"
-              onClick={() => setThemeMode(prev => (prev === 'dark' ? 'light' : 'dark'))}
-            >
-              {themeMode === 'dark' ? '☀️ Modo claro' : '🌙 Modo oscuro clínico'}
-            </button>
-            <button type="button" className="btn-outline" onClick={handleLogout}>
-              Cerrar sesión
-            </button>
-          </div>
-        </div>
-      </aside>
+      <SidebarNav
+        activeSection={activeSection}
+        onSelectSection={setActiveSection}
+        mealLogsCount={workspace.mealLogs?.length || 0}
+        conversationsCount={workspace.conversations?.length || 0}
+        documentsCount={workspace.documents?.length || 0}
+        knowledgeScore={userMemory.knowledgeScore}
+        userInitials={userInitials}
+        currentUser={currentUser}
+        themeMode={themeMode}
+        onToggleTheme={() => setThemeMode(prev => (prev === 'dark' ? 'light' : 'dark'))}
+        onLogout={handleLogout}
+      />
 
       {/* ÁREA PRINCIPAL DE CONTENIDO */}
       <main className="main-area">
@@ -3087,6 +2303,7 @@ export default function App() {
                   Sustitución inteligente sugerida (Smart Swap): cambia por <strong>{liveMealAiFeedback.smartSwap.to}</strong> — {liveMealAiFeedback.smartSwap.benefit}
                 </div>
               )}
+              <HealthDisclaimer compact />
             </div>
 
             <div className="split-grid">
@@ -3621,6 +2838,7 @@ export default function App() {
                           className={`bubble ${m.role} ${m.guardrailTriggered ? 'guardrail' : ''}`}
                         >
                           <div>{renderFormattedText(m.text)}</div>
+                          {m.role === 'assistant' && !m.guardrailTriggered && <HealthDisclaimer compact />}
 
                           {m.citations && m.citations.length > 0 && (
                             <div className="source-list">
@@ -3821,351 +3039,43 @@ export default function App() {
         {/* ====================================================================
             SECCIÓN 4.5: RENDIMIENTO CORPORAL, TELEMETRÍA IA Y BASE RELACIONAL
            ==================================================================== */}
-        {activeSection === 'analytics' && (() => {
-          const telemetryList = Array.isArray(workspace.aiTelemetry) ? workspace.aiTelemetry : [];
-          const avgLatency =
-            telemetryList.length > 0
-              ? Math.round(
-                  telemetryList.reduce((acc, ev) => acc + (Number(ev.latencyMs) || 0), 0) /
-                    telemetryList.length
-                )
-              : 0;
-          const totalSavedAll = telemetryList.reduce(
-            (acc, ev) => acc + (Number(ev.tokensSaved) || 0),
-            0
-          );
-          const zeroTokenCount = telemetryList.filter(ev => Number(ev.tokensUsed || 0) === 0).length;
-          const zeroTokenPct =
-            telemetryList.length > 0 ? Math.round((zeroTokenCount / telemetryList.length) * 100) : 100;
+        {activeSection === 'analytics' && (
+          <HealthProgressSection
+            currentUser={currentUser}
+            bodyAdherence={Math.round(
+              pctKcal * 0.4 +
+                pctProtein * 0.35 +
+                (goalWater > 0 ? Math.min(100, Math.round((waterTodayMl / goalWater) * 100)) : 0) *
+                  0.25
+            )}
+            userMemory={userMemory}
+            aiProgress={aiProgress}
+            clinicalRecord={clinicalRecord}
+            clinicalRubric={clinicalRubric}
+            clinicalConsentChecked={clinicalConsentChecked}
+            setClinicalConsentChecked={setClinicalConsentChecked}
+            selectedInstitutionId={selectedInstitutionId}
+            setSelectedInstitutionId={setSelectedInstitutionId}
+            clinicalSyncNotice={clinicalSyncNotice}
+            onFederatedDiscovery={handleFederatedHospitalDiscovery}
+            onUpdateClinicalField={handleUpdateClinicalField}
+            onApplyRubricConditions={handleApplyRubricConditionsToProfile}
+            onExportPdf={() =>
+              openPrintableClinicalReport({
+                userProfile: currentUser,
+                metrics: processCoach.metrics,
+                countryName: processCoach.country.name,
+                activeProtocols: userMemory.activeProtocols,
+                clinicalRecord,
+                clinicalRubric,
+                adaptiveCheckIn,
+                mealsToday,
+                userMemory
+              })
+            }
+          />
+        )}
 
-          const bodyAdherence = Math.round(
-            (pctKcal * 0.4 +
-              pctProtein * 0.35 +
-              (goalWater > 0 ? Math.min(100, Math.round((waterTodayMl / goalWater) * 100)) : 0) *
-                0.25)
-          );
-
-          return (
-            <div>
-              <div className="section-photo-banner banner-clinical">
-                <div>
-                  <span className="tag-pill" style={{ background: 'rgba(255,255,255,0.18)', color: '#fff', borderColor: 'rgba(255,255,255,0.3)' }}>
-                    Seguimiento de Salud · Bienestar Personalizado
-                  </span>
-                  <h1 className="page-title" style={{ color: '#ffffff', marginTop: '6px' }}>
-                    Mi Salud, Progreso y Exámenes Médicos
-                  </h1>
-                  <p style={{ fontSize: '0.85rem', opacity: 0.92, marginTop: '3px' }}>
-                    Revisa tu constancia diaria, conecta tus exámenes médicos de forma segura y descarga tu reporte de salud cuando lo necesites.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="btn-outline"
-                  style={{ background: '#ffffff', color: '#0b7a5c', borderColor: '#ffffff', fontWeight: 600 }}
-                  onClick={() =>
-                    openPrintableClinicalReport({
-                      userProfile: currentUser,
-                      metrics: processCoach.metrics,
-                      countryName: processCoach.country.name,
-                      activeProtocols: userMemory.activeProtocols,
-                      clinicalRecord,
-                      clinicalRubric,
-                      adaptiveCheckIn,
-                      mealsToday,
-                      userMemory
-                    })
-                  }
-                >
-                  Exportar Reporte de Salud (PDF)
-                </button>
-              </div>
-
-              <div className="stats-row">
-                <div className="stat-box">
-                  <div className="stat-label">Constancia de tu día</div>
-                  <div className="stat-value">{bodyAdherence}%</div>
-                  <div className="progress-track">
-                    <div className="progress-fill" style={{ width: `${bodyAdherence}%` }} />
-                  </div>
-                  <div className="stat-sub">Calorías · Proteína · Hidratación</div>
-                </div>
-
-                <div className="stat-box">
-                  <div className="stat-label">Personalización de tu plan</div>
-                  <div className="stat-value">{userMemory.knowledgeScore}%</div>
-                  <div className="progress-track">
-                    <div className="progress-fill" style={{ width: `${userMemory.knowledgeScore}%` }} />
-                  </div>
-                  <div className="stat-sub">Tu perfil, hábitos y alimentos locales</div>
-                </div>
-
-                <div className="stat-box">
-                  <div className="stat-label">Racha de seguimiento</div>
-                  <div className="stat-value">{aiProgress.streakDays} día(s)</div>
-                  <div className="progress-track">
-                    <div className="progress-fill" style={{ width: `${aiProgress.consistencyPct}%` }} />
-                  </div>
-                  <div className="stat-sub">Consistencia semanal: {aiProgress.consistencyPct}%</div>
-                </div>
-
-                <div className="stat-box">
-                  <div className="stat-label">Cuidados médicos activos</div>
-                  <div className="stat-value">{userMemory.activeProtocols.length}</div>
-                  <div className="stat-sub" style={{ marginTop: '8px' }}>
-                    {userMemory.activeProtocols.length > 0
-                      ? 'Plan adaptado a tu salud'
-                      : 'Enfoque general de bienestar'}
-                  </div>
-                </div>
-              </div>
-
-              {/* VINCULACIÓN CLÍNICA / HOSPITALARIA SIMPLIFICADA PARA EL USUARIO */}
-              <div className="card" style={{ marginTop: '18px' }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'flex-start',
-                    gap: '12px',
-                    flexWrap: 'wrap',
-                    marginBottom: '12px'
-                  }}
-                >
-                  <div>
-                    <span className="tag-pill">
-                      Conexión médica privada · Correo: {currentUser.email}
-                    </span>
-                    <div className="card-title" style={{ marginTop: '8px' }}>
-                      Tus Exámenes Médicos y Seguimiento Clínico
-                    </div>
-                    <div className="card-desc" style={{ marginBottom: 0 }}>
-                      Conecta tus resultados de laboratorio de tu clínica u hospital con tu mismo correo para que tu plan de alimentación cuide cada indicador de tu salud.
-                    </div>
-                  </div>
-                  {clinicalRubric && (
-                    <span className="nutri-badge nutri-grade-A" style={{ fontSize: '0.78rem', padding: '5px 12px' }}>
-                      Sincronización: {clinicalRubric.totalScore}%
-                    </span>
-                  )}
-                </div>
-
-                {!clinicalRecord ? (
-                  <div className="form-stack" style={{ marginTop: '12px' }}>
-                    <label
-                      className="list-item-card"
-                      style={{ cursor: 'pointer', alignItems: 'flex-start', gap: '10px', padding: '10px 12px' }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={clinicalConsentChecked}
-                        onChange={e => setClinicalConsentChecked(e.target.checked)}
-                        style={{ marginTop: '3px' }}
-                      />
-                      <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                        <strong>Autorización privada:</strong> Autorizo conectar mis resultados médicos usando mi correo (<strong>{currentUser.email}</strong>) para personalizar mis recomendaciones de alimentación.
-                      </span>
-                    </label>
-
-                    <div className="field-row">
-                      <div className="field-group">
-                        <label className="field-label">Tu clínica, hospital o laboratorio</label>
-                        <select
-                          className="input-clean"
-                          value={selectedInstitutionId}
-                          onChange={e => setSelectedInstitutionId(e.target.value)}
-                        >
-                          {CLINICAL_INSTITUTIONS.map(inst => (
-                            <option key={inst.id} value={inst.id}>
-                              {inst.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="field-group" style={{ justifyContent: 'flex-end', gap: '8px' }}>
-                        <button
-                          type="button"
-                          className="btn-solid"
-                          onClick={handleFederatedHospitalDiscovery}
-                        >
-                          Conectar mis exámenes médicos con mi correo
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="split-grid" style={{ marginTop: '14px' }}>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.84rem', marginBottom: '8px' }}>
-                        Laboratorios y expediente clínico ({clinicalRecord.institutionName})
-                      </div>
-                      <div className="form-stack">
-                        <div className="field-row">
-                          <div className="field-group">
-                            <label className="field-label">Glucosa ayunas (mg/dL)</label>
-                            <input
-                              type="number"
-                              className="input-clean"
-                              value={clinicalRecord.fastingGlucose}
-                              onChange={e => handleUpdateClinicalField('fastingGlucose', Number(e.target.value))}
-                            />
-                          </div>
-                          <div className="field-group">
-                            <label className="field-label">HbA1c (%)</label>
-                            <input
-                              type="number"
-                              step="0.1"
-                              className="input-clean"
-                              value={clinicalRecord.hba1c}
-                              onChange={e => handleUpdateClinicalField('hba1c', Number(e.target.value))}
-                            />
-                          </div>
-                        </div>
-                        <div className="field-row">
-                          <div className="field-group">
-                            <label className="field-label">Colesterol LDL (mg/dL)</label>
-                            <input
-                              type="number"
-                              className="input-clean"
-                              value={clinicalRecord.ldlCholesterol}
-                              onChange={e => handleUpdateClinicalField('ldlCholesterol', Number(e.target.value))}
-                            />
-                          </div>
-                          <div className="field-group">
-                            <label className="field-label">Triglicéridos (mg/dL)</label>
-                            <input
-                              type="number"
-                              className="input-clean"
-                              value={clinicalRecord.triglycerides}
-                              onChange={e => handleUpdateClinicalField('triglycerides', Number(e.target.value))}
-                            />
-                          </div>
-                        </div>
-                        <div className="field-row">
-                          <div className="field-group">
-                            <label className="field-label">Hemoglobina (g/dL)</label>
-                            <input
-                              type="number"
-                              step="0.1"
-                              className="input-clean"
-                              value={clinicalRecord.hemoglobin}
-                              onChange={e => handleUpdateClinicalField('hemoglobin', Number(e.target.value))}
-                            />
-                          </div>
-                          <div className="field-group">
-                            <label className="field-label">Presión sistólica (mmHg)</label>
-                            <input
-                              type="number"
-                              className="input-clean"
-                              value={clinicalRecord.bloodPressureSys}
-                              onChange={e => handleUpdateClinicalField('bloodPressureSys', Number(e.target.value))}
-                            />
-                          </div>
-                        </div>
-                        <div className="field-row">
-                          <div className="field-group">
-                            <label className="field-label">Alergias / Intolerancias</label>
-                            <input
-                              type="text"
-                              className="input-clean"
-                              value={clinicalRecord.allergies}
-                              onChange={e => handleUpdateClinicalField('allergies', e.target.value)}
-                            />
-                          </div>
-                          <div className="field-group">
-                            <label className="field-label">Medicación actual</label>
-                            <input
-                              type="text"
-                              className="input-clean"
-                              placeholder="Ej. Metformina, Losartán, Levotiroxina..."
-                              value={clinicalRecord.medications}
-                              onChange={e => handleUpdateClinicalField('medications', e.target.value)}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.84rem', marginBottom: '8px' }}>
-                        Rúbrica de Coordinación Clínica (5 Criterios · {clinicalRubric?.totalScore || 0}/100)
-                      </div>
-                      <div className="list-stack">
-                        {(clinicalRubric?.criteria || []).map(c => (
-                          <div key={c.name} className="list-item-card" style={{ padding: '8px 12px' }}>
-                            <span style={{ fontSize: '0.79rem' }}>{c.name}</span>
-                            <strong style={{ fontSize: '0.8rem' }}>
-                              {c.score} / {c.max}
-                            </strong>
-                          </div>
-                        ))}
-
-                        {clinicalRubric?.biomarkerAlerts?.length > 0 && (
-                          <div className="list-item-card" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
-                            <strong style={{ fontSize: '0.8rem', color: 'var(--accent)' }}>
-                              Alertas de biomarcadores detectadas
-                            </strong>
-                            {clinicalRubric.biomarkerAlerts.map((a, i) => (
-                              <span key={i} style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
-                                • {a}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-
-                        {clinicalRubric?.drugNutrientAlerts?.length > 0 && (
-                          <div className="list-item-card" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
-                            <strong style={{ fontSize: '0.8rem' }}>Interacciones fármaco-nutriente</strong>
-                            {clinicalRubric.drugNutrientAlerts.map((a, i) => (
-                              <span key={i} style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
-                                • {a}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-
-                        {clinicalRecord.federatedSources?.length > 0 && (
-                          <div className="list-item-card" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
-                            <strong style={{ fontSize: '0.8rem' }}>
-                              Nodos clínicos consolidados vía HL7 FHIR ({clinicalRecord.federatedSources.length})
-                            </strong>
-                            {clinicalRecord.federatedSources.map(src => (
-                              <span key={src.institutionId} style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
-                                • <strong>{src.institutionName}:</strong> {src.resources.join(', ')} ({src.status})
-                              </span>
-                            ))}
-                          </div>
-                        )}
-
-                        {clinicalRubric?.missingSyncedConditions?.length > 0 && (
-                          <button
-                            type="button"
-                            className="btn-solid"
-                            onClick={() =>
-                              handleApplyRubricConditionsToProfile(clinicalRubric.detectedConditions)
-                            }
-                          >
-                            Aplicar {clinicalRubric.missingSyncedConditions.length} protocolo(s) clínico(s) detectado(s) a mi perfil IA
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {clinicalSyncNotice && (
-                  <div style={{ marginTop: '10px', fontSize: '0.8rem', color: 'var(--accent)', fontWeight: 500 }}>
-                    {clinicalSyncNotice}
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* ====================================================================
-            SECCIÓN 5: MI CUENTA Y METAS (CONFIGURACIÓN DESDE 0 + CALCULADORA)
-           ==================================================================== */}
         {activeSection === 'profile' && (
           <div>
             <div className="page-header">
@@ -4509,169 +3419,18 @@ export default function App() {
         )}
       </main>
 
-      {/* COPILOTO IA OMNIPRESENTE (SABE EN QUÉ PANTALLA ESTÁS Y TE GUÍA EN TODO MOMENTO) */}
-      {copilotOpen && (() => {
-        const contextualActions =
-          activeSection === 'meals'
-            ? [
-                {
-                  label: 'Evaluar si mis platos hoy cumplen mis protocolos médicos',
-                  q: 'Evalúa si mis comidas registradas hoy cumplen mis protocolos médicos y mi meta de proteína.'
-                },
-                {
-                  label: `Alternativa más económica en ${processCoach.country.name}`,
-                  q: `Dame una alternativa de plato saludable y económica usando la productividad alimenticia de ${processCoach.country.name}.`
-                }
-              ]
-            : activeSection === 'documents'
-              ? [
-                  {
-                    label: 'Cruzar mis PDFs con las guías médicas globales',
-                    q: 'Cruza mis documentos guardados con las guías globales OMS/ADA/DASH y dime qué priorizar hoy.'
-                  }
-                ]
-              : activeSection === 'profile'
-                ? [
-                    {
-                      label: 'Explicar mi TMB, GET y metabolismo',
-                      q: 'Explícame mi TMB, GET y cómo manejar mi tipo de metabolismo en mi proceso diario.'
-                    }
-                  ]
-                : [
-                    {
-                      label: `¿Qué comer ahora en ${processCoach.country.name}?`,
-                      q: `Según mi país (${processCoach.country.name}), mi metabolismo y lo que me falta hoy, ¿qué comida me recomiendas ahora?`
-                    },
-                    {
-                      label: 'Revisar mi evolución y alertas clínicas',
-                      q: 'Revisa mi evolución de peso, promedio de comidas y condiciones médicas para darme el siguiente paso hoy.'
-                    }
-                  ];
-
-        return (
-          <div className="copilot-drawer">
-            <div className="copilot-header">
-              <div>
-                <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>
-                  Tu Asistente Nutricional · {processCoach.country.name}
-                </div>
-                <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                  Listo para ayudarte en tu alimentación hoy
-                </div>
-              </div>
-              <button
-                type="button"
-                className="btn-ghost"
-                style={{ padding: '4px 8px' }}
-                onClick={() => setCopilotOpen(false)}
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="copilot-body">
-              <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
-                Acciones rápidas para donde estás ahora:
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {contextualActions.map(act => (
-                  <button
-                    key={act.label}
-                    type="button"
-                    className="btn-outline"
-                    style={{ textAlign: 'left', fontSize: '0.78rem', padding: '7px 10px' }}
-                    onClick={() => handleCopilotAsk(act.q)}
-                    disabled={isCopilotLoading}
-                  >
-                    {act.label}
-                  </button>
-                ))}
-              </div>
-
-              {isCopilotLoading && (
-                <div className="copilot-reply">Analizando tu perfil, país y protocolos médicos…</div>
-              )}
-
-              {copilotReply && !isCopilotLoading && (
-                <div className="copilot-reply">
-                  {renderFormattedText(copilotReply.answer)}
-                </div>
-              )}
-
-              <div className="copilot-nav-chips">
-                <button
-                  type="button"
-                  className="copilot-chip"
-                  onClick={() => {
-                    setActiveSection('meals');
-                    setCopilotOpen(false);
-                  }}
-                >
-                  Ir a Comidas
-                </button>
-                <button
-                  type="button"
-                  className="copilot-chip"
-                  onClick={() => {
-                    setActiveSection('analytics');
-                    setCopilotOpen(false);
-                  }}
-                >
-                  Mi Salud y Exámenes
-                </button>
-                <button
-                  type="button"
-                  className="copilot-chip"
-                  onClick={() => {
-                    setActiveSection('documents');
-                    setCopilotOpen(false);
-                  }}
-                >
-                  Mis Planes y Guías
-                </button>
-                <button
-                  type="button"
-                  className="copilot-chip"
-                  onClick={() => {
-                    setActiveSection('profile');
-                    setCopilotOpen(false);
-                  }}
-                >
-                  Mi Perfil y Metas
-                </button>
-              </div>
-            </div>
-
-            <form
-              className="copilot-footer"
-              onSubmit={e => {
-                e.preventDefault();
-                handleCopilotAsk();
-              }}
-            >
-              <input
-                type="text"
-                className="input-clean"
-                style={{ fontSize: '0.8rem', padding: '8px 10px' }}
-                placeholder="Pregúntale al Copiloto desde aquí…"
-                value={copilotInput}
-                onChange={e => setCopilotInput(e.target.value)}
-              />
-              <button type="submit" className="btn-solid" disabled={isCopilotLoading}>
-                Enviar
-              </button>
-            </form>
-          </div>
-        );
-      })()}
-
-      <button
-        type="button"
-        className="copilot-fab"
-        onClick={() => setCopilotOpen(prev => !prev)}
-      >
-        <span>{copilotOpen ? 'Cerrar Copiloto IA' : 'Copiloto IA'}</span>
-      </button>
+      <CopilotDrawer
+        copilotOpen={copilotOpen}
+        onToggleOpen={setCopilotOpen}
+        activeSection={activeSection}
+        countryName={processCoach.country.name}
+        copilotInput={copilotInput}
+        onChangeInput={setCopilotInput}
+        copilotReply={copilotReply}
+        isCopilotLoading={isCopilotLoading}
+        onAsk={handleCopilotAsk}
+        onNavigate={setActiveSection}
+      />
     </div>
   );
 }
