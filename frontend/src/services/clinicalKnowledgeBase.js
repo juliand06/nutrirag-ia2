@@ -49,6 +49,22 @@ export const MEDICAL_CONDITIONS = [
     keyRules:
       'Distribuye 1.6–2.2 g de proteína/kg en 3–4 tomas (~0.4 g/kg por comida), incluye carbohidratos complejos 60–90 min antes de entrenar y repón agua + electrolitos tras el esfuerzo.',
     alertRule: 'No entrenar en déficit severo ni descuidar la proteína post-entrenamiento.'
+  },
+  {
+    id: 'higado_graso_metabolico',
+    label: 'Hígado graso metabólico (MASLD / Esteatosis)',
+    source: 'Guía Clínica EASL / ESPEN de Hepatología Nutricional',
+    keyRules:
+      'Objetivo clínico de reducción ponderal gradual del 7–10% si hay sobrepeso, eliminación de jarabes de fructosa/bebidas azucaradas, patrón mediterráneo con aceite de oliva, legumbres y Omega-3.',
+    alertRule: 'Evitar alcohol, refrescos azucarados y harinas ultraprocesadas.'
+  },
+  {
+    id: 'salud_renal_kdigo',
+    label: 'Protección renal / Control de sodio y fósforo',
+    source: 'Guía Clínica KDIGO (Kidney Disease: Improving Global Outcomes)',
+    keyRules:
+      'Limita sodio (<2,000 mg/día), evita aditivos fosfatados de ultraprocesados, prioriza proteína de alta calidad ajustada por médico/nutricionista y mantén hidratación supervisada.',
+    alertRule: 'Evitar suplementos proteicos excesivos sin indicación nefrológica y bebidas cola/embutidos.'
   }
 ];
 
@@ -156,6 +172,40 @@ export const GLOBAL_MEDICAL_RAG_DOCUMENTS = [
         tokenCount: 570,
         content:
           'Según el consenso ISSN, distribuir 0.35–0.45 g de proteína por kg de peso en 3–4 comidas optimiza la síntesis proteica muscular. Dormir menos de 7 horas eleva la grelina (hambre) y el cortisol, dificultando la pérdida de grasa y la recuperación; por ello el descanso y la hidratación (35 ml/kg) son pilares del proceso nutricional.'
+      }
+    ]
+  },
+  {
+    id: 'doc-global-espen-kdigo-easl',
+    tenantId: 'reference',
+    ownerUsername: 'sistema',
+    fileName: 'Protocolo_Especializado_ESPEN_KDIGO_EASL_Crononutricion.pdf',
+    sha256Hash: 'global-med-espen-kdigo-easl-2026',
+    totalPages: 4,
+    totalChunks: 2,
+    ocrApplied: false,
+    embeddingModel: 'text-embedding-004',
+    tempFileDeleted: true,
+    indexingStatus: 'INDEXED',
+    createdAt: '2026-11-19',
+    chunks: [
+      {
+        id: 'chk-easl-kdigo-1',
+        pageNumber: 1,
+        sectionTitle: 'Hígado Graso (EASL) y Protección Renal (KDIGO)',
+        chunkOrder: 1,
+        tokenCount: 590,
+        content:
+          'En hígado graso metabólico (EASL/ESPEN), reducir bebidas azucaradas y fructosa añadida, priorizar Omega-3, legumbres y aceite de oliva logra revertir esteatosis hepática con pérdidas graduales de 7–10% del peso. En protección renal (KDIGO), eliminar fósforo inorgánico de ultraprocesados y controlar el sodio (<2g/día) protege la filtración glomerular.'
+      },
+      {
+        id: 'chk-crono-2',
+        pageNumber: 3,
+        sectionTitle: 'Crononutrición Clínica y Ventanas Metabólicas (ESPEN)',
+        chunkOrder: 2,
+        tokenCount: 540,
+        content:
+          'La crononutrición demuestra que la sensibilidad a la insulina es mayor durante las primeras horas del día y disminuye en la noche. Concentrar mayor proporción calórica y carbohidratos complejos en desayuno y almuerzo, manteniendo cenas ligeras 2–3 horas antes de dormir, mejora la glucemia, la calidad del sueño y la recomposición corporal.'
       }
     ]
   }

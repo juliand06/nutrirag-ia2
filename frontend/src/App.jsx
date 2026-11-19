@@ -132,7 +132,9 @@ export default function App() {
   const [workspace, setWorkspace] = useState(() =>
     currentUser ? getUserWorkspace(currentUser) : null
   );
-  const [activeSection, setActiveSection] = useState('summary'); // 'summary' | 'chat' | 'meals' | 'documents' | 'profile'
+  const [activeSection, setActiveSection] = useState('summary'); // 'summary' | 'chat' | 'meals' | 'documents' | 'analytics' | 'profile'
+  const [summaryTab, setSummaryTab] = useState('process'); // 'process' | 'tracking' | 'memory'
+  const [analyticsTab, setAnalyticsTab] = useState('fhir'); // 'fhir' | 'telemetry'
 
   // Estado de Consultas (Chat)
   const [chatInput, setChatInput] = useState('');
@@ -1350,39 +1352,45 @@ export default function App() {
                 </button>
               </div>
             ) : (
-              <div
-                className="card"
-                style={{
-                  marginBottom: '22px',
-                  background: 'var(--bg-surface)',
-                  borderLeft: '4px solid var(--accent)',
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: '14px'
-                }}
-              >
+              <div className="hero-clinical-banner">
                 <div style={{ maxWidth: '680px' }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.92rem', color: 'var(--text-primary)' }}>
-                    Soporte nutricional inteligente sobre tu progreso de hoy
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                    <span className="tag-pill">País: {processCoach.country.name}</span>
+                    <span className="tag-pill">Memoria IA: {userMemory.knowledgeScore}%</span>
+                    <span className="tag-pill">
+                      Medicina: {userMemory.activeProtocols.length > 0 ? `${userMemory.activeProtocols.length} protocolos` : 'OMS · ESPEN · ADA'}
+                    </span>
                   </div>
-                  <div style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', marginTop: '3px' }}>
-                    Llevas <strong>{consumedKcal} kcal</strong> de <strong>{goalKcal} kcal</strong> ({pctKcal}%) y <strong>{consumedProtein}g</strong> de proteína. Te restan <strong>{Math.max(0, goalKcal - consumedKcal)} kcal</strong> y <strong>{Math.max(0, goalProtein - consumedProtein)}g de proteína</strong> para alcanzar tu objetivo de hoy.
+                  <div style={{ fontWeight: 600, fontSize: '1rem' }}>
+                    {processCoach.nextActionTitle}
+                  </div>
+                  <div style={{ fontSize: '0.83rem', opacity: 0.92, marginTop: '4px' }}>
+                    Llevas <strong>{consumedKcal} / {goalKcal} kcal</strong> ({pctKcal}%) · Restan{' '}
+                    <strong>{Math.max(0, goalKcal - consumedKcal)} kcal</strong> y{' '}
+                    <strong>{Math.max(0, goalProtein - consumedProtein)}g de proteína</strong> hoy.
                   </div>
                 </div>
-                <button
-                  type="button"
-                  className="btn-outline"
-                  onClick={() => {
-                    setActiveSection('chat');
-                    handleSendQuestion(
-                      `Llevo ${consumedKcal} kcal consumidas hoy de mi meta de ${goalKcal} kcal (${consumedCarbs}g carbohidratos y ${consumedProtein}g proteína). ¿Qué comida me recomiendas para completar mis requerimientos de hoy?`
-                    );
-                  }}
-                >
-                  Sugerir comida según mis calorías restantes
-                </button>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn-outline"
+                    onClick={() => setCopilotOpen(true)}
+                  >
+                    Abrir Copiloto IA
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-outline"
+                    onClick={() => {
+                      setActiveSection('chat');
+                      handleSendQuestion(
+                        `Llevo ${consumedKcal} kcal consumidas hoy de mi meta de ${goalKcal} kcal (${consumedCarbs}g carbohidratos y ${consumedProtein}g proteína). ¿Qué comida local de ${processCoach.country.name} me recomiendas ahora?`
+                      );
+                    }}
+                  >
+                    Sugerir siguiente comida
+                  </button>
+                </div>
               </div>
             )}
 
@@ -1449,7 +1457,33 @@ export default function App() {
               </div>
             </div>
 
+            {/* SUB-TABS COMPACTAS PARA MANTENER EL PANEL ROBUSTO Y SIN SCROLL EXCESIVO */}
+            <div className="subtab-bar">
+              <button
+                type="button"
+                className={`subtab-btn ${summaryTab === 'process' ? 'active' : ''}`}
+                onClick={() => setSummaryTab('process')}
+              >
+                Plan y Proceso IA ({processCoach.country.name})
+              </button>
+              <button
+                type="button"
+                className={`subtab-btn ${summaryTab === 'tracking' ? 'active' : ''}`}
+                onClick={() => setSummaryTab('tracking')}
+              >
+                Comidas e Hidratación ({mealsToday.length})
+              </button>
+              <button
+                type="button"
+                className={`subtab-btn ${summaryTab === 'memory' ? 'active' : ''}`}
+                onClick={() => setSummaryTab('memory')}
+              >
+                Memoria Clínica IA ({userMemory.knowledgeScore}%)
+              </button>
+            </div>
+
             {/* ACOMPAÑAMIENTO ACTIVO DE LA IA EN EL PROCESO (PAÍS + METABOLISMO + POSIBILIDADES) */}
+            {summaryTab === 'process' && (
             <div className="card" style={{ marginBottom: '20px' }}>
               <div
                 style={{
@@ -1561,8 +1595,10 @@ export default function App() {
                 </div>
               </div>
             </div>
+            )}
 
             {/* MEMORIA DEL AGENTE IA + BASE NUTRICIONAL Y MÉDICA GLOBAL */}
+            {summaryTab === 'memory' && (
             <div className="card" style={{ marginBottom: '20px' }}>
               <div
                 style={{
@@ -1665,7 +1701,9 @@ export default function App() {
                 </div>
               </div>
             </div>
+            )}
 
+            {summaryTab === 'tracking' && (
             <div className="split-grid">
               <div className="card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
@@ -1792,6 +1830,7 @@ export default function App() {
                 )}
               </div>
             </div>
+            )}
           </div>
         )}
 
@@ -2501,7 +2540,25 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="split-grid" style={{ marginTop: '18px' }}>
+              <div className="subtab-bar" style={{ marginTop: '18px' }}>
+                <button
+                  type="button"
+                  className={`subtab-btn ${analyticsTab === 'fhir' ? 'active' : ''}`}
+                  onClick={() => setAnalyticsTab('fhir')}
+                >
+                  Red Federada Clínica (HL7 FHIR)
+                </button>
+                <button
+                  type="button"
+                  className={`subtab-btn ${analyticsTab === 'telemetry' ? 'active' : ''}`}
+                  onClick={() => setAnalyticsTab('telemetry')}
+                >
+                  Base Relacional y Telemetría IA
+                </button>
+              </div>
+
+              {analyticsTab === 'telemetry' && (
+              <div className="split-grid">
                 <div className="card">
                   <div className="card-title">Arquitectura de Base de Datos Relacional</div>
                   <div className="card-desc">
@@ -2576,9 +2633,11 @@ export default function App() {
                   )}
                 </div>
               </div>
+              )}
 
               {/* VINCULACIÓN CLÍNICA / HOSPITALARIA POR CORREO + RÚBRICA DE COORDINACIÓN */}
-              <div className="card" style={{ marginTop: '20px' }}>
+              {analyticsTab === 'fhir' && (
+              <div className="card">
                 <div
                   style={{
                     display: 'flex',
@@ -2823,6 +2882,7 @@ export default function App() {
                   </div>
                 )}
               </div>
+              )}
             </div>
           );
         })()}
@@ -3257,6 +3317,50 @@ export default function App() {
                   {renderFormattedText(copilotReply.answer)}
                 </div>
               )}
+
+              <div className="copilot-nav-chips">
+                <button
+                  type="button"
+                  className="copilot-chip"
+                  onClick={() => {
+                    setActiveSection('meals');
+                    setCopilotOpen(false);
+                  }}
+                >
+                  Ir a Comidas
+                </button>
+                <button
+                  type="button"
+                  className="copilot-chip"
+                  onClick={() => {
+                    setActiveSection('analytics');
+                    setAnalyticsTab('fhir');
+                    setCopilotOpen(false);
+                  }}
+                >
+                  Sincronizar Clínica FHIR
+                </button>
+                <button
+                  type="button"
+                  className="copilot-chip"
+                  onClick={() => {
+                    setActiveSection('documents');
+                    setCopilotOpen(false);
+                  }}
+                >
+                  Mis PDFs RAG
+                </button>
+                <button
+                  type="button"
+                  className="copilot-chip"
+                  onClick={() => {
+                    setActiveSection('profile');
+                    setCopilotOpen(false);
+                  }}
+                >
+                  Perfil y Metabolismo
+                </button>
+              </div>
             </div>
 
             <form
