@@ -128,6 +128,15 @@ export default function App() {
     geminiKey: validGemini
   });
 
+  // Tema visual (Claro Editorial / Modo Oscuro Clínico estilo MacroFactor)
+  const [themeMode, setThemeMode] = useState(
+    () => localStorage.getItem('nutristudio_theme') || 'light'
+  );
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', themeMode);
+    localStorage.setItem('nutristudio_theme', themeMode);
+  }, [themeMode]);
+
   // Estado de Autenticación y Cuenta Activa
   const [currentUser, setCurrentUser] = useState(() => getCurrentSessionUser());
   const [showLanding, setShowLanding] = useState(true);
@@ -1025,6 +1034,43 @@ export default function App() {
       setClinicalSyncNotice('Protocolos detectados por la rúbrica aplicados a tu perfil IA.');
       setTimeout(() => setClinicalSyncNotice(''), 4000);
     }
+  };
+
+  const handleToggleFastingWindow = (protocolHours = 14) => {
+    updateWorkspace(prev => {
+      const currentFast = prev.fastingState || { active: false, startedAt: null, targetHours: 14 };
+      if (currentFast.active) {
+        return {
+          ...prev,
+          fastingState: { active: false, startedAt: null, targetHours: currentFast.targetHours || 14 }
+        };
+      }
+      return {
+        ...prev,
+        fastingState: {
+          active: true,
+          startedAt: new Date().toISOString(),
+          targetHours: protocolHours
+        }
+      };
+    });
+  };
+
+  const handleExportAccountBackupJson = () => {
+    if (!currentUser || !workspace) return;
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      platform: 'NutriStudio AI',
+      profile: { ...currentUser, password: '***' },
+      workspace
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `nutristudio-respaldo-${currentUser.email.split('@')[0]}-${todayIso}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   // ============================================================================
@@ -1927,9 +1973,18 @@ export default function App() {
               <div className="user-meta">{currentUser.email}</div>
             </div>
           </div>
-          <button type="button" className="btn-outline" onClick={handleLogout}>
-            Cerrar sesión
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <button
+              type="button"
+              className="btn-outline"
+              onClick={() => setThemeMode(prev => (prev === 'dark' ? 'light' : 'dark'))}
+            >
+              {themeMode === 'dark' ? '☀️ Modo claro' : '🌙 Modo oscuro clínico'}
+            </button>
+            <button type="button" className="btn-outline" onClick={handleLogout}>
+              Cerrar sesión
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -2196,6 +2251,47 @@ export default function App() {
                         + Buscar alimento (Yuka/Macros)
                       </button>
                     </div>
+
+                    {/* VENTANA DE CRONONUTRICIÓN / AYUNO INTELIGENTE (YAZIO · ESPEN) */}
+                    {(() => {
+                      const fs = workspace.fastingState || { active: false, startedAt: null, targetHours: 14 };
+                      const elapsedHrs =
+                        fs.active && fs.startedAt
+                          ? Math.max(0, (Date.now() - new Date(fs.startedAt).getTime()) / (1000 * 60 * 60))
+                          : 0;
+                      const fastPct = fs.active
+                        ? Math.min(100, Math.round((elapsedHrs / (fs.targetHours || 14)) * 100))
+                        : 0;
+                      return (
+                        <div
+                          style={{
+                            paddingTop: '10px',
+                            borderTop: '1px solid var(--border)',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            gap: '8px',
+                            flexWrap: 'wrap'
+                          }}
+                        >
+                          <div style={{ fontSize: '0.75rem' }}>
+                            <strong>Crononutrición / Ayuno ({fs.targetHours || 14}h):</strong>{' '}
+                            <span style={{ color: 'var(--text-secondary)' }}>
+                              {fs.active
+                                ? `${elapsedHrs.toFixed(1)}h transcurridas (${fastPct}%)`
+                                : 'Inactivo (reposo digestivo nocturno recomendado 12–14h)'}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            className="copilot-chip"
+                            onClick={() => handleToggleFastingWindow(fs.targetHours || 14)}
+                          >
+                            {fs.active ? 'Finalizar ventana' : 'Iniciar ventana 14h'}
+                          </button>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               );
@@ -4479,6 +4575,13 @@ export default function App() {
                       {workspace.mealLogs?.length || 0} / {workspace.conversations?.length || 0} / {workspace.documents?.length || 0}
                     </strong>
                   </div>
+                  <button
+                    type="button"
+                    className="btn-outline"
+                    onClick={handleExportAccountBackupJson}
+                  >
+                    Descargar respaldo completo de mis datos (JSON)
+                  </button>
                 </div>
               </div>
             </div>

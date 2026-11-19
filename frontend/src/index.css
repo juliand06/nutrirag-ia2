@@ -1481,3 +1481,46 @@ body {
   text-align: center;
   box-shadow: 0 16px 36px rgba(15, 107, 86, 0.2);
 }
+
+
+/* ==========================================================================
+   MODO OSCURO CLÍNICO PROFESIONAL (ESTILO MACROFACTOR)
+   ========================================================================== */
+[data-theme='dark'] {
+  --bg-page: #0c1412;
+  --bg-surface: #13201c;
+  --bg-subtle: #1a2c27;
+  --border: #243b34;
+  --border-strong: #32544a;
+  --text-primary: #eef6f3;
+  --text-secondary: #a8bfb8;
+  --text-muted: #769188;
+  --accent: #14b8a6;
+  --accent-hover: #0d9488;
+  --accent-soft: #13332d;
+  --accent-gradient: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
+  --shadow-card: 0 4px 18px rgba(0, 0, 0, 0.35);
+  --shadow-hover: 0 8px 26px rgba(20, 184, 166, 0.16);
+}
+
+[data-theme='dark'] .landing-nav {
+  background: rgba(12, 20, 18, 0.9);
+}
+
+[data-theme='dark'] .landing-floating-stat {
+  background: rgba(19, 32, 28, 0.94);
+}
+
+[data-theme='dark'] .input-clean,
+[data-theme='dark'] select.input-clean,
+[data-theme='dark'] textarea.input-clean {
+  background: #0f1a17;
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+[data-theme='dark'] .streak-pill {
+  background: rgba(234, 88, 12, 0.18);
+  border-color: rgba(251, 146, 60, 0.4);
+  color: #fdba74;
+}

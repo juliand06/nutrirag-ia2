@@ -1,30 +1,45 @@
-# NutriRAG & Vision AI — Proyecto para la Clase IA2
-**Arquitectura RAG con Java Spring Boot + PostgreSQL (`pgvector`) + Guardrails Nutricionales + Análisis Multimodal de Comidas**
+# NutriStudio AI — NutriRAG & Vision AI (Plataforma Clínica de Nutrición IA2)
+
+**Plataforma Integral de Nutrición Clínica AI-Native + Arquitectura RAG Híbrida (`pgvector`) + Visión Multimodal + Red Federada HL7 FHIR + Productividad Alimenticia por País**
 
 ---
 
-## 1. Análisis de los Requerimientos y Adaptación al Dominio de Nutrición
+## 1. Visión y Capacidades Principales
 
-El documento de arquitectura define un sistema **RAG (Retrieval-Augmented Generation)** con **privacidad de archivos locales** (el PDF original permanece en el computador del cliente y la copia temporal en el servidor se elimina tras indexar). Aquí está cómo cada punto se implementó para tu proyecto de **Nutrición, Calorías y Bienestar**:
+**NutriStudio AI** une lo mejor de las plataformas líderes de nutrición (**MyFitnessPal, Cronometer Pro, Yuka, Eat This Much, Fitia, Nutrium y MacroFactor**) con una **arquitectura RAG clínica híbrida con privacidad local de PDFs**:
 
-| Punto del Documento | Requerimiento Técnico | Implementación en NutriRAG & Vision AI |
+- **Portada Editorial + Onboarding Biométrico en 3 Pasos:** Pantalla de bienvenida con fotografías editoriales, frases motivacionales y registro guiado (*Cuenta/País → Cuerpo/Edad/Metabolismo → Objetivo/Salud Clínica*) que calcula **TMB, GET, IMC, calorías, macros y agua** desde el primer segundo.
+- **Dashboard Visual Premium (Modo Claro y Modo Oscuro Clínico):**
+  - **Anillo Circular SVG de Calorías** + barras de macros diferenciadas por color + **Hidratación visual interactiva de 8 vasos** + **Ventana de Crononutrición / Ayuno (14h)**.
+  - **Diario Visual por 4 Tiempos de Comida** (*Desayuno, Almuerzo, Merienda, Cena*) + **Micronutrientes (Cronometer)** + **Gráfica SVG de tendencia de peso**.
+- **Base de Datos Extensa (40+ alimentos globales y regionales):** Buscador instantáneo con **Nutri-Score A–E / Calidad Yuka (0–100)**, **NOVA 1–4**, índice glucémico, micronutrientes (*fibra, sodio, potasio, hierro, calcio, vitamina C, Omega-3*) y prioridad automática por país.
+- **IA Integrada en Todo el Seguimiento (AI-Native):**
+  - **Motor Metabólico Adaptativo (estilo MacroFactor):** Recalibra calorías según la tendencia real de peso e ingesta.
+  - **Menú Automático Diario + Lista de Mercado Semanal IA (7 días)** agrupada por pasillo y adaptada al país y presupuesto (*Colombia, México, Perú, Argentina, Chile, Ecuador, España y EE. UU.*).
+  - **Evaluación en vivo de comidas + Smart Swaps** y **Copiloto IA Omnipresente** con movilidad en toda la app.
+- **Medicina Nutricional Especializada + Red Federada HL7 FHIR:**
+  - Corpus clínico basado en **OMS/FAO, ADA, AHA/DASH, ISSN, ESPEN, KDIGO y EASL**.
+  - Consolidación autorizada de expediente clínico por correo verificado (**SMART on FHIR / OAuth2**), **Rúbrica de Coordinación de 5 criterios (0–100%)**, alertas de biomarcadores, interacciones fármaco-nutriente y **Reporte Clínico Exportable a PDF**.
+- **Privacidad RAG + Gobernanza de Tokens:**
+  - Los PDFs originales se conservan en el PC del usuario; la copia temporal en el servidor se elimina tras indexar (`SHA-256` + `Files.deleteIfExists`).
+  - Compresión de memoria (~120 tokens), tope estricto (`900` entrada / `420` salida), caché de `0 tokens`, Guardrail Tranquilo pre-LLM y presupuesto diario (`12,000 tokens`) con degradación elegante al motor RAG local.
+
+---
+
+## 2. Arquitectura del Repositorio
+
+| Módulo | Tecnología | Descripción |
 | :--- | :--- | :--- |
-| **1. Objetivo** | Conservar los PDF originales en el PC del cliente mientras consulta su contenido indexado en el VPS con el PC apagado. | Los planes nutricionales, tablas de calorías y guías clínicas de cada usuario se fragmentan, vectorizan y consultan desde la base de datos sin retener el PDF original. |
-| **2. Componentes** | Cliente Web HTTPS, Spring Boot, Procesador Asíncrono, Embeddings OpenAI/Gemini, PostgreSQL + `pgvector`, Motor RAG Híbrido. | Separado en `frontend/` (React + Vite), `backend/` (Spring Boot 3.3 + `@EnableAsync`) y `docker-compose.yml` (`pgvector/pgvector:pg16` + modo H2 de respaldo). |
-| **3–5. Carga, Validación y OCR** | Carga temporal cifrada, validación de límites/hash SHA-256, extracción de texto y OCR para páginas escaneadas. | `PdfIndexingService.java` calcula el hash `SHA-256`, extrae texto por página con `Apache PDFBox` y activa el fallback de OCR cuando detecta páginas escaneadas. |
-| **6–8. Segmentación y Embeddings** | Fragmentos de 500–1.000 tokens con solapamiento moderado conservando página, sección y orden; vectores en `pgvector`. | `DocumentChunk.java` e `init-db.sql` almacenan `page_number`, `section_title`, `chunk_order`, `token_count` y `embedding vector(1536)` con índice `HNSW`. |
-| **9. Eliminación Temporal** | Verificar la indexación y eliminar la copia temporal del PDF en el servidor. | En el bloque `finally` de `PdfIndexingService.java` se ejecuta `Files.deleteIfExists(tempPdfPath)` y se registra `tempFileDeleted = true` con marca de tiempo. |
-| **10–13. Flujo de Consulta Híbrida** | Embedding con el mismo modelo, filtro de tenant/autorización, combinación vectorial + textual y respuesta con citas. | `HybridRagService.java` y `nutriRagEngine.js` combinan similitud coseno (65%) + búsqueda léxica Full-Text (35%), filtran por `tenant_id` y citan **Documento, Página y Sección**. |
-| **Req. Adicional #3** | **Guardrail Tranquilo ante errores o temas ajenos a la nutrición.** | `NutritionGuardrailService.java` detecta preguntas fuera de alimentación (fútbol, programación, política o errores de teclado) y responde con calma invitando a preguntar sobre nutrición y calorías. |
-| **Req. Adicional #4** | **Análisis de Imágenes de Comidas (Calorías, Carbohidratos y Macros).** | `FoodVisionService.java` y la Pestaña 2 del Frontend analizan fotos de platos (desglosando calorías totales, carbohidratos, proteínas, grasas, fibra, carga glucémica e ingredientes) e incluyen Guardrail si la imagen subida no es comida. |
+| **`frontend/`** | React 18 + Vite | Aplicación web completa **NutriStudio AI** (`App.jsx`, `nutriRagEngine.js`, `foodDatabase.js`, `countryNutritionData.js`, `clinicalKnowledgeBase.js`, `clinicalSyncService.js`, `aiWorkflowEngine.js`, `userStorage.js`). |
+| **`backend/`** | Java 17 + Spring Boot 3.3 | API REST (`NutriRagController`, `ClinicalPlatformController`), ingesta de PDF con Apache PDFBox + OCR fallback, RAG híbrido (65% coseno + 35% léxico), Guardrail Tranquilo y Visión Multimodal. |
+| **`docker/`** | PostgreSQL 16 + `pgvector` | Esquema relacional completo (`init-db.sql`): tablas externas de país y rúbricas clínicas, tablas internas biométricas/comidas/progreso, expediente HL7 FHIR, auditoría federada, telemetría IA y chunks vectoriales (`HNSW` + `GIN`). |
+| **`nutri_global/`** | Python + Streamlit + LangChain + Pydantic | Versión alineada a la estructura base `tribuna_global` con salida estructurada Pydantic, escritura atómica y pruebas unitarias `pytest`. |
 
 ---
 
-## 2. Cómo Ejecutar el Proyecto para la Presentación
+## 3. Cómo Ejecutar el Proyecto
 
-### A. Iniciar el Frontend Interactivo (React + Vite)
-El Frontend cuenta con conexión al Backend y además un **Motor RAG + Visión de Respaldo Integrado**, por lo que funciona inmediatamente con un solo comando:
-
+### A. Frontend Interactivo (React + Vite)
 ```bash
 cd frontend
 npm install
@@ -32,20 +47,15 @@ npm run dev
 ```
 Abre en tu navegador: `http://localhost:5173`
 
-### B. Iniciar la Base de Datos PostgreSQL + `pgvector` (Opcional con Docker)
+### B. Base de Datos PostgreSQL + `pgvector` (Docker)
 ```bash
 docker compose up -d
 ```
 
-### C. Iniciar el Backend Java + Spring Boot
-- **Modo Demo (Sin requerir Docker abierto):**
-  ```bash
-  cd backend
-  mvn spring-boot:run
-  ```
-- **Modo Estricto PostgreSQL + `pgvector`:**
-  ```bash
-  cd backend
-  mvn spring-boot:run -Dspring-boot.run.profiles=pgvector
-  ```
-
+### C. Backend Java + Spring Boot
+```bash
+cd backend
+mvn spring-boot:run
+# O con perfil PostgreSQL + pgvector:
+mvn spring-boot:run -Dspring-boot.run.profiles=pgvector
+```
