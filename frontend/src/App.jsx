@@ -1159,7 +1159,11 @@ export default function App() {
         <div className="landing-page">
           <header className="landing-nav">
             <div className="auth-brand" style={{ marginBottom: 0 }}>
-              <div className="auth-mark">N</div>
+              <img
+                src="/nutristudio-logo.svg"
+                alt="Logo NutriStudio AI"
+                style={{ width: '34px', height: '34px', borderRadius: '9px' }}
+              />
               <span className="auth-brand-name" style={{ fontSize: '1.12rem' }}>
                 NutriStudio AI
               </span>
@@ -1936,8 +1940,12 @@ export default function App() {
       <aside className="sidebar">
         <div>
           <div className="sidebar-brand">
-            <div className="auth-mark">N</div>
-            <span className="auth-brand-name">NutriStudio</span>
+            <img
+              src="/nutristudio-logo.svg"
+              alt="Logo NutriStudio AI"
+              style={{ width: '34px', height: '34px', borderRadius: '9px' }}
+            />
+            <span className="auth-brand-name">NutriStudio AI</span>
           </div>
 
           <nav className="sidebar-nav">
