@@ -2838,8 +2838,9 @@ export default function App() {
                       (m.mealType || '').toLowerCase().includes(slot.toLowerCase())
                     );
                     const slotKcal = slotMeals.reduce((acc, m) => acc + (Number(m.totalCalories) || 0), 0);
+                    const slotKey = slot.toLowerCase();
                     return (
-                      <div key={slot} className="meal-slot-card">
+                      <div key={slot} className={`meal-slot-card meal-slot-${slotKey}`}>
                         <div className="meal-slot-head">
                           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             <div className="meal-slot-badge">{icon}</div>
@@ -3055,13 +3056,21 @@ export default function App() {
            ==================================================================== */}
         {activeSection === 'meals' && (
           <div>
-            <div className="page-header">
+            <div className="section-photo-banner banner-meals">
               <div>
-                <h1 className="page-title">Registro de comidas</h1>
-                <p className="page-subtitle">
-                  Analiza una fotografía, busca en la base nutricional (Yuka/Cronometer) o ingresa datos manuales con evaluación IA en vivo.
+                <span className="tag-pill" style={{ background: 'rgba(255,255,255,0.18)', color: '#fff', borderColor: 'rgba(255,255,255,0.3)' }}>
+                  Visión IA · Base 40+ Alimentos · Nutri-Score A–E
+                </span>
+                <h1 className="page-title" style={{ color: '#ffffff', marginTop: '6px' }}>
+                  Registro y Escáner Inteligente de Comidas
+                </h1>
+                <p style={{ fontSize: '0.85rem', opacity: 0.92, marginTop: '3px' }}>
+                  Sube una foto de tu plato, busca en la base con calidad Yuka/Cronometer o registra manualmente con evaluación IA en tiempo real.
                 </p>
               </div>
+              <span className="nutri-badge nutri-grade-A" style={{ fontSize: '0.8rem', padding: '6px 12px' }}>
+                {mealsToday.length} plato(s) hoy · {consumedKcal} kcal
+              </span>
             </div>
 
             {/* EVALUACIÓN IA EN VIVO DE TUS COMIDAS + SMART SWAPS (0 TOKENS LLM) */}
@@ -3845,16 +3854,22 @@ export default function App() {
 
           return (
             <div>
-              <div className="page-header">
+              <div className="section-photo-banner banner-clinical">
                 <div>
-                  <h1 className="page-title">Rendimiento Corporal, IA y Base Relacional</h1>
-                  <p className="page-subtitle">
-                    Monitoreo en vivo de tu proceso físico, gasto y rendimiento de la IA, y conexión entre tu historial relacional y las bases globales/país.
+                  <span className="tag-pill" style={{ background: 'rgba(255,255,255,0.18)', color: '#fff', borderColor: 'rgba(255,255,255,0.3)' }}>
+                    HL7 FHIR R4 · OMS · ADA · DASH · ESPEN · KDIGO
+                  </span>
+                  <h1 className="page-title" style={{ color: '#ffffff', marginTop: '6px' }}>
+                    Rendimiento Corporal, IA y Red Clínica
+                  </h1>
+                  <p style={{ fontSize: '0.85rem', opacity: 0.92, marginTop: '3px' }}>
+                    Monitoreo en vivo de tu cuerpo, telemetría de tokens y sincronización autorizada con clínicas y hospitales.
                   </p>
                 </div>
                 <button
                   type="button"
-                  className="btn-solid"
+                  className="btn-outline"
+                  style={{ background: '#ffffff', color: '#0b7a5c', borderColor: '#ffffff', fontWeight: 600 }}
                   onClick={() =>
                     openPrintableClinicalReport({
                       userProfile: currentUser,
