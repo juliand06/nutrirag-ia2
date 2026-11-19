@@ -1255,19 +1255,19 @@ export default function App() {
           <section className="landing-metrics-strip">
             <div className="landing-metric-pill">
               <div className="landing-metric-num">40+</div>
-              <div className="landing-metric-label">Alimentos con Nutri-Score A–E y Micronutrientes</div>
+              <div className="landing-metric-label">Alimentos reales con puntaje de calidad A–E</div>
             </div>
             <div className="landing-metric-pill">
               <div className="landing-metric-num">8 Países</div>
-              <div className="landing-metric-label">Productividad alimenticia local y presupuesto</div>
+              <div className="landing-metric-label">Planes con alimentos locales y a tu alcance</div>
             </div>
             <div className="landing-metric-pill">
-              <div className="landing-metric-num">7 Guías</div>
-              <div className="landing-metric-label">OMS · ADA · DASH · ISSN · ESPEN · KDIGO · EASL</div>
+              <div className="landing-metric-num">100%</div>
+              <div className="landing-metric-label">Respaldado en medicina nutricional clínica</div>
             </div>
             <div className="landing-metric-pill">
-              <div className="landing-metric-num">HL7 FHIR</div>
-              <div className="landing-metric-label">Sincronización clínica autorizada + IA 24/7</div>
+              <div className="landing-metric-num">24/7</div>
+              <div className="landing-metric-label">Asistente inteligente que te acompaña hoy</div>
             </div>
           </section>
 
@@ -1434,8 +1434,8 @@ export default function App() {
               </div>
             </div>
 
-            <div style={{ fontSize: '0.76rem', opacity: 0.82 }}>
-              NutriRAG &amp; Vision AI · Privacidad local de PDFs y gobernanza de tokens para uso diario.
+            <div style={{ fontSize: '0.76rem', opacity: 0.85 }}>
+              NutriStudio AI · Tu bienestar nutricional, claro, cercano y personalizado cada día.
             </div>
           </div>
         </section>
@@ -1966,21 +1966,21 @@ export default function App() {
               className={`sidebar-link ${activeSection === 'chat' ? 'active' : ''}`}
               onClick={() => setActiveSection('chat')}
             >
-              <span className="sidebar-link-label"><span>💬</span> Consultas IA</span>
+              <span className="sidebar-link-label"><span>💬</span> Asistente Nutricional</span>
               <span className="sidebar-count">{workspace.conversations?.length || 0}</span>
             </button>
             <button
               className={`sidebar-link ${activeSection === 'documents' ? 'active' : ''}`}
               onClick={() => setActiveSection('documents')}
             >
-              <span className="sidebar-link-label"><span>📄</span> Mis documentos</span>
+              <span className="sidebar-link-label"><span>📄</span> Mis planes y guías</span>
               <span className="sidebar-count">{workspace.documents?.length || 0}</span>
             </button>
             <button
               className={`sidebar-link ${activeSection === 'analytics' ? 'active' : ''}`}
               onClick={() => setActiveSection('analytics')}
             >
-              <span className="sidebar-link-label"><span>🩺</span> Rendimiento e IA</span>
+              <span className="sidebar-link-label"><span>🩺</span> Mi Salud y Progreso</span>
               <span className="sidebar-count">{userMemory.knowledgeScore}%</span>
             </button>
             <button
@@ -2469,9 +2469,9 @@ export default function App() {
                       <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
                           <strong style={{ fontSize: '0.88rem' }}>
-                            Lista de Mercado Semanal Inteligente — {shop.countryName} (Presupuesto: {shop.budgetId})
+                            Lista de Mercado Semanal — {shop.countryName} (Presupuesto: {shop.budgetId})
                           </strong>
-                          <span className="tag-pill">Calculada para 7 días · 0 tokens LLM</span>
+                          <span className="tag-pill">Calculada para tus 7 días</span>
                         </div>
                         <div className="split-grid">
                           {shop.aisles.map(group => (
@@ -2767,22 +2767,7 @@ export default function App() {
                       ))
                     )}
                     <span style={{ fontSize: '0.71rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                      Nota: Orientación nutricional educativa basada en guías clínicas globales; no sustituye valoración médica profesional.
-                    </span>
-                  </div>
-
-                  <div className="list-item-card" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '6px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', fontSize: '0.82rem' }}>
-                      <strong>Control y ahorro de tokens (Uso diario continuo)</strong>
-                      <span>
-                        {todayTokenStats.used.toLocaleString()} / {TOKEN_GOVERNANCE.DAILY_TOKEN_BUDGET.toLocaleString()} tokens
-                      </span>
-                    </div>
-                    <div className="progress-track" style={{ width: '100%' }}>
-                      <div className="progress-fill" style={{ width: `${pctTokenBudget}%` }} />
-                    </div>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                      Compresión activa (máx. {TOKEN_GOVERNANCE.MAX_CONTEXT_TOKENS} tokens entrada / {TOKEN_GOVERNANCE.MAX_OUTPUT_TOKENS} salida), caché de 0 tokens y guardrail local. Ahorro estimado hoy: <strong>{todayTokenStats.saved.toLocaleString()} tokens</strong>.
+                      Nota: Orientación nutricional educativa basada en guías médicas; no sustituye valoración médica profesional.
                     </span>
                   </div>
                 </div>
@@ -3814,7 +3799,7 @@ export default function App() {
                             {doc.totalPages} páginas · {doc.totalChunks} secciones · Subido: {doc.createdAt}
                           </div>
                           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '3px' }}>
-                            SHA-256: {doc.sha256Hash?.slice(0, 24)}… · Copia temporal eliminada
+                            🔒 Guardado de forma privada en tu cuenta
                           </div>
                         </div>
                         <button
@@ -3865,13 +3850,13 @@ export default function App() {
               <div className="section-photo-banner banner-clinical">
                 <div>
                   <span className="tag-pill" style={{ background: 'rgba(255,255,255,0.18)', color: '#fff', borderColor: 'rgba(255,255,255,0.3)' }}>
-                    HL7 FHIR R4 · OMS · ADA · DASH · ESPEN · KDIGO
+                    Seguimiento de Salud · Bienestar Personalizado
                   </span>
                   <h1 className="page-title" style={{ color: '#ffffff', marginTop: '6px' }}>
-                    Rendimiento Corporal, IA y Red Clínica
+                    Mi Salud, Progreso y Exámenes Médicos
                   </h1>
                   <p style={{ fontSize: '0.85rem', opacity: 0.92, marginTop: '3px' }}>
-                    Monitoreo en vivo de tu cuerpo, telemetría de tokens y sincronización autorizada con clínicas y hospitales.
+                    Revisa tu constancia diaria, conecta tus exámenes médicos de forma segura y descarga tu reporte de salud cuando lo necesites.
                   </p>
                 </div>
                 <button
@@ -3892,13 +3877,13 @@ export default function App() {
                     })
                   }
                 >
-                  Exportar Reporte Clínico (PDF)
+                  Exportar Reporte de Salud (PDF)
                 </button>
               </div>
 
               <div className="stats-row">
                 <div className="stat-box">
-                  <div className="stat-label">Adherencia de tu proceso hoy</div>
+                  <div className="stat-label">Constancia de tu día</div>
                   <div className="stat-value">{bodyAdherence}%</div>
                   <div className="progress-track">
                     <div className="progress-fill" style={{ width: `${bodyAdherence}%` }} />
@@ -3907,135 +3892,36 @@ export default function App() {
                 </div>
 
                 <div className="stat-box">
-                  <div className="stat-label">Conocimiento del Bot sobre ti</div>
+                  <div className="stat-label">Personalización de tu plan</div>
                   <div className="stat-value">{userMemory.knowledgeScore}%</div>
                   <div className="progress-track">
                     <div className="progress-fill" style={{ width: `${userMemory.knowledgeScore}%` }} />
                   </div>
-                  <div className="stat-sub">Memoria clínica + hábitos + país</div>
+                  <div className="stat-sub">Tu perfil, hábitos y alimentos locales</div>
                 </div>
 
                 <div className="stat-box">
-                  <div className="stat-label">Gasto de tokens hoy</div>
-                  <div className="stat-value">
-                    {todayTokenStats.used.toLocaleString()}{' '}
-                    <span style={{ fontSize: '0.8rem', fontWeight: 400, color: 'var(--text-muted)' }}>
-                      / {TOKEN_GOVERNANCE.DAILY_TOKEN_BUDGET.toLocaleString()}
-                    </span>
-                  </div>
+                  <div className="stat-label">Racha de seguimiento</div>
+                  <div className="stat-value">{aiProgress.streakDays} día(s)</div>
                   <div className="progress-track">
-                    <div className="progress-fill" style={{ width: `${pctTokenBudget}%` }} />
+                    <div className="progress-fill" style={{ width: `${aiProgress.consistencyPct}%` }} />
                   </div>
-                  <div className="stat-sub">Ahorro acumulado: {Math.max(todayTokenStats.saved, totalSavedAll).toLocaleString()} tokens</div>
+                  <div className="stat-sub">Consistencia semanal: {aiProgress.consistencyPct}%</div>
                 </div>
 
                 <div className="stat-box">
-                  <div className="stat-label">Eficiencia y latencia IA</div>
-                  <div className="stat-value">{avgLatency > 0 ? `${avgLatency} ms` : '<15 ms'}</div>
+                  <div className="stat-label">Cuidados médicos activos</div>
+                  <div className="stat-value">{userMemory.activeProtocols.length}</div>
                   <div className="stat-sub" style={{ marginTop: '8px' }}>
-                    {zeroTokenPct}% resuelto a 0 tokens (caché / local / guardrail)
+                    {userMemory.activeProtocols.length > 0
+                      ? 'Plan adaptado a tu salud'
+                      : 'Enfoque general de bienestar'}
                   </div>
                 </div>
               </div>
 
-              <div className="subtab-bar" style={{ marginTop: '18px' }}>
-                <button
-                  type="button"
-                  className={`subtab-btn ${analyticsTab === 'fhir' ? 'active' : ''}`}
-                  onClick={() => setAnalyticsTab('fhir')}
-                >
-                  Red Federada Clínica (HL7 FHIR)
-                </button>
-                <button
-                  type="button"
-                  className={`subtab-btn ${analyticsTab === 'telemetry' ? 'active' : ''}`}
-                  onClick={() => setAnalyticsTab('telemetry')}
-                >
-                  Base Relacional y Telemetría IA
-                </button>
-              </div>
-
-              {analyticsTab === 'telemetry' && (
-              <div className="split-grid">
-                <div className="card">
-                  <div className="card-title">Arquitectura de Base de Datos Relacional</div>
-                  <div className="card-desc">
-                    Conexión en tiempo real entre tu base interna de usuario y las bases externas globales y de país (`docker/init-db.sql`).
-                  </div>
-                  <div className="list-stack">
-                    <div className="list-item-card">
-                      <div>
-                        <strong>Base Interna · Perfil Biométrico</strong>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                          `users_biometric_profiles` · {processCoach.metrics ? `TMB ${processCoach.metrics.bmr} · GET ${processCoach.metrics.tdee} · IMC ${processCoach.metrics.bmi}` : 'Pendiente de medidas'}
-                        </div>
-                      </div>
-                      <span className="tag-pill">Activo</span>
-                    </div>
-                    <div className="list-item-card">
-                      <div>
-                        <strong>Base Interna · Comidas y Progreso Corporal</strong>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                          `daily_meal_logs` ({workspace.mealLogs?.length || 0}) · `body_progress_logs` ({workspace.weightHistory?.length || 0})
-                        </div>
-                      </div>
-                      <span className="tag-pill">Relacional</span>
-                    </div>
-                    <div className="list-item-card">
-                      <div>
-                        <strong>Base Externa · Productividad por País</strong>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                          `country_food_productivity` → {processCoach.country.name} ({processCoach.country.foods.length} alimentos locales indexados)
-                        </div>
-                      </div>
-                      <span className="tag-pill">{processCoach.country.id}</span>
-                    </div>
-                    <div className="list-item-card">
-                      <div>
-                        <strong>Base Externa · Rúbricas Médicas Globales</strong>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                          `clinical_nutrition_rubrics` (OMS · FAO · ADA · AHA/DASH · ISSN) · {userMemory.activeProtocols.length} activas en tu perfil
-                        </div>
-                      </div>
-                      <span className="tag-pill">RAG Híbrido</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="card">
-                  <div className="card-title">Telemetría reciente de la IA ({telemetryList.length})</div>
-                  <div className="card-desc">
-                    Registro de cada interacción: pantalla, modo de enrutamiento, latencia y tokens consumidos/ahorrados.
-                  </div>
-                  {telemetryList.length === 0 ? (
-                    <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', padding: '14px 0' }}>
-                      Aún no hay eventos registrados hoy. Usa el Copiloto IA flotante o haz una consulta para ver la telemetría en vivo.
-                    </p>
-                  ) : (
-                    <div className="list-stack">
-                      {telemetryList.slice(0, 6).map(ev => (
-                        <div key={ev.id} className="list-item-card">
-                          <div>
-                            <strong style={{ fontSize: '0.82rem' }}>{ev.mode}</strong>
-                            <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
-                              Pantalla: {ev.screen} · {ev.time} · {ev.latencyMs} ms
-                            </div>
-                          </div>
-                          <div style={{ textAlign: 'right', fontSize: '0.75rem' }}>
-                            <strong>{ev.tokensUsed} tok</strong>
-                            <div style={{ color: 'var(--accent)' }}>-{ev.tokensSaved} ahorrados</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-              )}
-
-              {/* VINCULACIÓN CLÍNICA / HOSPITALARIA POR CORREO + RÚBRICA DE COORDINACIÓN */}
-              {analyticsTab === 'fhir' && (
-              <div className="card">
+              {/* VINCULACIÓN CLÍNICA / HOSPITALARIA SIMPLIFICADA PARA EL USUARIO */}
+              <div className="card" style={{ marginTop: '18px' }}>
                 <div
                   style={{
                     display: 'flex',
@@ -4048,18 +3934,18 @@ export default function App() {
                 >
                   <div>
                     <span className="tag-pill">
-                      Interoperabilidad Clínica / Hospitalaria · Correo verificado: {currentUser.email}
+                      Conexión médica privada · Correo: {currentUser.email}
                     </span>
                     <div className="card-title" style={{ marginTop: '8px' }}>
-                      Expediente Clínico Real y Rúbrica de Coordinación de Datos
+                      Tus Exámenes Médicos y Seguimiento Clínico
                     </div>
                     <div className="card-desc" style={{ marginBottom: 0 }}>
-                      Conecta tus registros de clínicas especializadas u hospitales mediante el mismo Gmail/correo con el que estás registrado. La rúbrica audita la concordancia con tus datos reales para que la IA te guíe con precisión clínica.
+                      Conecta tus resultados de laboratorio de tu clínica u hospital con tu mismo correo para que tu plan de alimentación cuide cada indicador de tu salud.
                     </div>
                   </div>
                   {clinicalRubric && (
-                    <span className="tag-pill" style={{ fontWeight: 600 }}>
-                      Concordancia Rúbrica: {clinicalRubric.totalScore}%
+                    <span className="nutri-badge nutri-grade-A" style={{ fontSize: '0.78rem', padding: '5px 12px' }}>
+                      Sincronización: {clinicalRubric.totalScore}%
                     </span>
                   )}
                 </div>
@@ -4077,13 +3963,13 @@ export default function App() {
                         style={{ marginTop: '3px' }}
                       />
                       <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                        <strong>Consentimiento informado (SMART on FHIR / OAuth2):</strong> Autorizo a NutriStudio a consultar y consolidar mi historial clínico usando mi correo verificado (<strong>{currentUser.email}</strong>) únicamente en clínicas, hospitales y laboratorios autorizados de la red interoperable.
+                        <strong>Autorización privada:</strong> Autorizo conectar mis resultados médicos usando mi correo (<strong>{currentUser.email}</strong>) para personalizar mis recomendaciones de alimentación.
                       </span>
                     </label>
 
                     <div className="field-row">
                       <div className="field-group">
-                        <label className="field-label">Clínica especializada u hospital específico</label>
+                        <label className="field-label">Tu clínica, hospital o laboratorio</label>
                         <select
                           className="input-clean"
                           value={selectedInstitutionId}
@@ -4091,7 +3977,7 @@ export default function App() {
                         >
                           {CLINICAL_INSTITUTIONS.map(inst => (
                             <option key={inst.id} value={inst.id}>
-                              {inst.name} — {inst.evidenceGrade}
+                              {inst.name}
                             </option>
                           ))}
                         </select>
@@ -4102,14 +3988,7 @@ export default function App() {
                           className="btn-solid"
                           onClick={handleFederatedHospitalDiscovery}
                         >
-                          Consolidar toda la Red Federada de Clínicas y Hospitales (FHIR)
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-outline"
-                          onClick={handleSyncClinicByEmail}
-                        >
-                          Sincronizar solo la institución seleccionada
+                          Conectar mis exámenes médicos con mi correo
                         </button>
                       </div>
                     </div>
@@ -4280,7 +4159,6 @@ export default function App() {
                   </div>
                 )}
               </div>
-              )}
             </div>
           );
         })()}
@@ -4675,10 +4553,10 @@ export default function App() {
             <div className="copilot-header">
               <div>
                 <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>
-                  Copiloto IA NutriStudio · {processCoach.country.name}
+                  Tu Asistente Nutricional · {processCoach.country.name}
                 </div>
                 <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                  Contexto activo: <strong>{activeSection}</strong> · Memoria {userMemory.knowledgeScore}% · {todayTokenStats.used}/{TOKEN_GOVERNANCE.DAILY_TOKEN_BUDGET} tok
+                  Listo para ayudarte en tu alimentación hoy
                 </div>
               </div>
               <button
@@ -4716,9 +4594,6 @@ export default function App() {
 
               {copilotReply && !isCopilotLoading && (
                 <div className="copilot-reply">
-                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
-                    Modo: <strong>{copilotReply.mode}</strong> · {copilotReply.tokensUsed} tokens · {copilotReply.latencyMs} ms
-                  </div>
                   {renderFormattedText(copilotReply.answer)}
                 </div>
               )}
@@ -4739,11 +4614,10 @@ export default function App() {
                   className="copilot-chip"
                   onClick={() => {
                     setActiveSection('analytics');
-                    setAnalyticsTab('fhir');
                     setCopilotOpen(false);
                   }}
                 >
-                  Sincronizar Clínica FHIR
+                  Mi Salud y Exámenes
                 </button>
                 <button
                   type="button"
@@ -4753,7 +4627,7 @@ export default function App() {
                     setCopilotOpen(false);
                   }}
                 >
-                  Mis PDFs RAG
+                  Mis Planes y Guías
                 </button>
                 <button
                   type="button"
@@ -4763,7 +4637,7 @@ export default function App() {
                     setCopilotOpen(false);
                   }}
                 >
-                  Perfil y Metabolismo
+                  Mi Perfil y Metas
                 </button>
               </div>
             </div>
