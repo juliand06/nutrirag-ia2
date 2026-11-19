@@ -1,65 +1,137 @@
 package com.ia2.nutrirag.service;
 
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
- * Requerimiento #3: Guardrail temático de Nutrición, Alimentación y Bienestar.
- * Si el usuario pregunta algo ajeno a la nutrición (programación, política, deportes, matemáticas,
- * o escribe un error común/texto sin sentido), responde con calma e invita a consultar sobre alimentación.
+ * Guardrail Híbrido Nutricional (LLM Semántico + Heurística Calibrada):
+ * Evita falsos positivos/negativos clasificando la intención con el LLM configurado
+ * en el servidor (OpenAI/Gemini) y usando una capa semántica determinista rápida
+ * como primera verificación y respaldo sin latencia.
  */
 @Service
+@Slf4j
 public class NutritionGuardrailService {
 
-    private static final List<String> NUTRITION_KEYWORDS = List.of(
-            "caloria", "calorías", "kcal", "carbohidrato", "proteina", "proteína", "grasa", "lipido", "lípido",
-            "fibra", "dieta", "nutricion", "nutrición", "alimento", "comida", "comer", "desayuno", "almuerzo",
-            "cena", "merienda", "snack", "fruta", "verdura", "vegetal", "pollo", "carne", "pescado", "huevo",
-            "arroz", "avena", "pan", "pasta", "azucar", "azúcar", "glucosa", "insulina", "indice glucemico",
-            "peso", "adelgazar", "deficit", "déficit", "superavit", "superávit", "masa muscular", "hipertrofia",
-            "hidratacion", "hidratación", "agua", "vitamina", "mineral", "hierro", "calcio", "magnesio",
-            "omega", "colesterol", "trigliceridos", "ayuno", "metabolismo", "basal", "tmb", "imc", "salud",
-            "bienestar", "digestion", "digestión", "microbiota", "receta", "plato", "porcion", "porción",
-            "gramos", "etiqueta", "ultraprocesado", "vegano", "vegetariano", "celiaco", "gluten", "lactosa",
-            "pdf", "documento", "plan", "guia", "guía", "expediente", "tabla", "hola", "buenos dias", "buenas"
+    @Value("${nutrirag.ai.provider:DEMO}")
+    private String aiProvider;
+
+    @Value("${nutrirag.ai.openai-api-key:}")
+    private String openAiApiKey;
+
+    @Value("${nutrirag.ai.gemini-api-key:}")
+    private String geminiApiKey;
+
+    private final RestTemplate restTemplate = new RestTemplate();
+
+    private static final List<String> CLEAR_NUTRITION_SIGNALS = List.of(
+            "caloria", "kcal", "carbohidrato", "proteina", "grasa", "fibra", "dieta", "nutricion",
+            "alimento", "comida", "desayuno", "almuerzo", "cena", "merienda", "agua", "hidratacion",
+            "peso", "metabolismo", "tmb", "imc", "glucosa", "insulina", "colesterol", "hipertension",
+            "anemia", "hierro", "vitamina", "omega", "menu", "plato", "receta", "ayuno", "salud"
     );
 
-    private static final List<String> OFF_TOPIC_TRIGGERS = List.of(
-            "futbol", "fútbol", "partido", "champions", "politica", "política", "presidente", "elecciones",
-            "programar", "java", "python", "javascript", "codigo", "código", "sql", " NullPointerException",
-            "404", "500", "videojuego", "pelicula", "película", "criptomoneda", "bitcoin", "trading",
-            "ecuacion", "ecuación", "derivada", "integral", "historia", "geografia", "capital de", "chiste",
-            "horoscopo", "horóscopo", "clima", "trafico", "tráfico"
+    private static final List<String> CLEAR_OFF_TOPIC_SIGNALS = List.of(
+            "champions", "partido de futbol", "elecciones", "presidente", "nullpointerexception",
+            "javascript", "python", "compilar", "bitcoin", "criptomoneda", "trading", "videojuego",
+            "derivada", "integral", "horoscopo"
     );
 
     public GuardrailEvaluation evaluateQuery(String rawQuery) {
         if (rawQuery == null || rawQuery.trim().length() < 2) {
             return new GuardrailEvaluation(false,
-                    "¡Hola! Parece que el mensaje llegó vacío o incompleto 😊. No te preocupes, estoy aquí para ayudarte con todo lo relacionado con tu **alimentación, cálculo de calorías, carbohidratos, lectura de tus planes nutricionales en PDF o análisis de fotos de tus comidas**. ¿Qué te gustaría consultar hoy?");
+                    "Tu mensaje llegó vacío o incompleto. Cuéntame sobre tu alimentación, calorías, metas o comidas y con gusto te ayudo. (Orientación informativa; no reemplaza a un profesional).");
         }
 
         String normalized = rawQuery.toLowerCase(Locale.ROOT);
+        boolean hasClearNutrition = CLEAR_NUTRITION_SIGNALS.stream().anyMatch(normalized::contains);
+        boolean hasClearOffTopic = CLEAR_OFF_TOPIC_SIGNALS.stream().anyMatch(normalized::contains);
 
-        boolean hasNutritionTerm = NUTRITION_KEYWORDS.stream().anyMatch(normalized::contains);
-        boolean hasOffTopicTerm = OFF_TOPIC_TRIGGERS.stream().anyMatch(normalized::contains);
-
-        if (hasOffTopicTerm && !hasNutritionTerm) {
-            return new GuardrailEvaluation(false,
-                    "Entiendo tu curiosidad 😊, pero soy **NutriRAG AI**, un asistente especializado exclusivamente en **nutrición, alimentación saludable, control de calorías, macronutrientes y bienestar**. " +
-                    "Sobre ese tema no puedo ayudarte, pero con mucho gusto puedo orientarte sobre cuántas calorías y carbohidratos necesitan tus comidas, analizar una foto de tu plato o consultar tus guías nutricionales indexadas. ¿Te gustaría que revisemos alguna comida o meta nutricional?");
+        // 1. Casos inequívocos: respuesta instantánea sin costo LLM
+        if (hasClearNutrition && !hasClearOffTopic) {
+            return new GuardrailEvaluation(true, null);
+        }
+        if (hasClearOffTopic && !hasClearNutrition) {
+            return new GuardrailEvaluation(false, buildCalmRedirect());
         }
 
-        if (!hasNutritionTerm && normalized.split("\\s+").length > 3) {
-            return new GuardrailEvaluation(false,
-                    "¡Hola! Con toda tranquilidad te comento que mi especialidad está enfocada en **nutrición, calorías, carbohidratos, análisis de comidas y bienestar corporal** 🥗. " +
-                    "¿Podrías reformular tu pregunta enfocándola en tu alimentación, tus requerimientos calóricos o los documentos nutricionales que tienes cargados en el sistema?");
+        // 2. Casos ambiguos: clasificación semántica con el LLM del servidor (evita falsos positivos/negativos)
+        Boolean llmDecision = classifyIntentWithLlm(rawQuery);
+        if (llmDecision != null) {
+            return llmDecision
+                    ? new GuardrailEvaluation(true, null)
+                    : new GuardrailEvaluation(false, buildCalmRedirect());
         }
 
-        return new GuardrailEvaluation(true, null);
+        // 3. Respaldo heurístico equilibrado para frases cortas o saludos
+        if (normalized.split("\\s+").length <= 3) {
+            return new GuardrailEvaluation(true, null);
+        }
+        return new GuardrailEvaluation(false, buildCalmRedirect());
+    }
+
+    @SuppressWarnings("unchecked")
+    private Boolean classifyIntentWithLlm(String query) {
+        try {
+            String classifierPrompt = "Clasifica si la siguiente consulta pertenece al dominio de nutrición, alimentación, salud metabólica, ejercicio o bienestar físico. Responde SOLO con ALLOW o BLOCK.\nConsulta: " + query;
+
+            if ("OPENAI".equalsIgnoreCase(aiProvider) && openAiApiKey != null && !openAiApiKey.isBlank()) {
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                headers.setBearerAuth(openAiApiKey.trim());
+                Map<String, Object> body = Map.of(
+                        "model", "gpt-4o-mini",
+                        "max_tokens", 8,
+                        "temperature", 0,
+                        "messages", List.of(Map.of("role", "user", "content", classifierPrompt))
+                );
+                ResponseEntity<Map> res = restTemplate.postForEntity(
+                        "https://api.openai.com/v1/chat/completions",
+                        new HttpEntity<>(body, headers),
+                        Map.class
+                );
+                if (res.getStatusCode().is2xxSuccessful() && res.getBody() != null) {
+                    String text = res.getBody().toString().toUpperCase(Locale.ROOT);
+                    return text.contains("ALLOW");
+                }
+            }
+
+            if ("GEMINI".equalsIgnoreCase(aiProvider) && geminiApiKey != null && !geminiApiKey.isBlank()) {
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                Map<String, Object> body = Map.of(
+                        "generationConfig", Map.of("maxOutputTokens", 8, "temperature", 0),
+                        "contents", List.of(Map.of("parts", List.of(Map.of("text", classifierPrompt))))
+                );
+                ResponseEntity<Map> res = restTemplate.postForEntity(
+                        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=" + geminiApiKey.trim(),
+                        new HttpEntity<>(body, headers),
+                        Map.class
+                );
+                if (res.getStatusCode().is2xxSuccessful() && res.getBody() != null) {
+                    String text = res.getBody().toString().toUpperCase(Locale.ROOT);
+                    return text.contains("ALLOW");
+                }
+            }
+        } catch (Exception ex) {
+            log.debug("Fallback guardrail determinista tras error LLM: {}", ex.getMessage());
+        }
+        return null;
+    }
+
+    private String buildCalmRedirect() {
+        return "Con mucho gusto te ayudo, pero mi especialidad es exclusivamente **nutrición, alimentación saludable, calorías, hábitos y bienestar físico**. ¿Qué comida, meta o consulta nutricional te gustaría revisar hoy? *(Orientación informativa; no reemplaza a un profesional).*";
     }
 
     public record GuardrailEvaluation(boolean allowed, String calmRedirectMessage) {}
 }
-

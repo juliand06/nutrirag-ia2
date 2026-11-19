@@ -1,20 +1,59 @@
-version: '3.8'
-
 services:
-  postgres-pgvector:
+  db:
     image: pgvector/pgvector:pg16
     container_name: nutrirag-pgvector
     environment:
-      POSTGRES_USER: nutrirag_user
-      POSTGRES_PASSWORD: nutrirag_password
-      POSTGRES_DB: nutrirag_db
+      POSTGRES_USER: ${POSTGRES_USER:-nutrirag_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nutrirag_password}
+      POSTGRES_DB: ${POSTGRES_DB:-nutrirag_db}
     ports:
       - "5432:5432"
     volumes:
       - pgvector_data:/var/lib/postgresql/data
       - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nutrirag_user} -d ${POSTGRES_DB:-nutrirag_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nutrirag-api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: pgvector
+      POSTGRES_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-nutrirag_db}
+      POSTGRES_USER: ${POSTGRES_USER:-nutrirag_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nutrirag_password}
+      JWT_SECRET: ${JWT_SECRET:-NutriStudioSuperSecretKeyForJwtSigningAtLeast256BitsLong2026!}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:3000,http://localhost}
+      AI_PROVIDER: ${AI_PROVIDER:-DEMO}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-disabled-in-local}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-disabled-in-local}
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080/api}
+    container_name: nutrirag-web
+    depends_on:
+      - api
+    ports:
+      - "3000:80"
     restart: unless-stopped
 
 volumes:
   pgvector_data:
-

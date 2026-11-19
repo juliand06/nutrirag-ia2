@@ -1,4 +1,15 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { useNutriStore } from './store/useNutriStore';
+import {
+  apiLogin,
+  apiRegister,
+  apiLogout,
+  apiUpdateProfile,
+  apiCreateMeal,
+  apiDeleteMeal,
+  apiCreateProgress
+} from './api/client';
 import { runHybridRagQuery, MEAL_PRESETS, TOKEN_GOVERNANCE } from './services/nutriRagEngine';
 import {
   COUNTRY_OPTIONS,
@@ -56,6 +67,8 @@ import AuthOnboarding from './components/AuthOnboarding';
 import SidebarNav from './components/SidebarNav';
 import CopilotDrawer from './components/CopilotDrawer';
 import HealthProgressSection from './components/HealthProgressSection';
+import CalorieRing from './components/CalorieRing';
+import WaterGlasses from './components/WaterGlasses';
 
 export default function App() {
   // SEGURIDAD: Ninguna clave de API se expone en el navegador; el backend proxy maneja las llamadas LLM si está activo.
@@ -63,14 +76,37 @@ export default function App() {
     backendUrl: (import.meta.env.VITE_API_BASE_URL || '').trim()
   });
 
-  // Tema visual (Claro Editorial / Modo Oscuro Clínico estilo MacroFactor)
-  const [themeMode, setThemeMode] = useState(
-    () => localStorage.getItem('nutristudio_theme') || 'light'
-  );
+  const navigate = useNavigate();
+  const location = useLocation();
+  const themeMode = useNutriStore(s => s.themeMode);
+  const toggleThemeMode = useNutriStore(s => s.toggleThemeMode);
+  const copilotOpen = useNutriStore(s => s.copilotOpen);
+  const setCopilotOpen = useNutriStore(s => s.setCopilotOpen);
+
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', themeMode);
-    localStorage.setItem('nutristudio_theme', themeMode);
   }, [themeMode]);
+
+  const sectionFromPath = (pathname) => {
+    if (pathname.startsWith('/comidas')) return 'meals';
+    if (pathname.startsWith('/asistente')) return 'chat';
+    if (pathname.startsWith('/planes')) return 'documents';
+    if (pathname.startsWith('/salud')) return 'analytics';
+    if (pathname.startsWith('/perfil')) return 'profile';
+    return 'summary';
+  };
+
+  const pathForSection = (sec) => {
+    const map = {
+      summary: '/dashboard',
+      meals: '/comidas',
+      chat: '/asistente',
+      documents: '/planes',
+      analytics: '/salud',
+      profile: '/perfil'
+    };
+    return map[sec] || '/dashboard';
+  };
 
   // Estado de Autenticación y Cuenta Activa
   const [currentUser, setCurrentUser] = useState(() => getCurrentSessionUser());
@@ -102,7 +138,19 @@ export default function App() {
   const [workspace, setWorkspace] = useState(() =>
     currentUser ? getUserWorkspace(currentUser) : null
   );
-  const [activeSection, setActiveSection] = useState('summary'); // 'summary' | 'chat' | 'meals' | 'documents' | 'analytics' | 'profile'
+  const [activeSection, setActiveSectionState] = useState(() => sectionFromPath(location.pathname));
+  const setActiveSection = (sec) => {
+    setActiveSectionState(sec);
+    const targetPath = pathForSection(sec);
+    if (location.pathname !== targetPath) {
+      navigate(targetPath);
+    }
+  };
+  useEffect(() => {
+    if (currentUser) {
+      setActiveSectionState(sectionFromPath(location.pathname));
+    }
+  }, [location.pathname, currentUser]);
   const [summaryTab, setSummaryTab] = useState('process'); // 'process' | 'tracking' | 'memory'
   const [analyticsTab, setAnalyticsTab] = useState('fhir'); // 'fhir' | 'telemetry'
 
@@ -162,8 +210,7 @@ export default function App() {
   const [newWeightInput, setNewWeightInput] = useState('');
   const [newWeightNote, setNewWeightNote] = useState('');
 
-  // Copiloto IA Omnipresente (contextual en toda la plataforma)
-  const [copilotOpen, setCopilotOpen] = useState(false);
+  // Copiloto IA Omnipresente (estado global copilotOpen manejado por Zustand)
   const [copilotInput, setCopilotInput] = useState('');
   const [copilotReply, setCopilotReply] = useState(null);
   const [isCopilotLoading, setIsCopilotLoading] = useState(false);
@@ -217,6 +264,17 @@ export default function App() {
     e.preventDefault();
     setAuthError('');
     try {
+      // Intenta autenticación JWT real contra Spring Boot; si está offline usa caché local con hash SHA-256
+      try {
+        const apiRes = await apiLogin(loginEmail, loginPassword);
+        if (apiRes?.user) {
+          setCurrentUser(apiRes.user);
+          setActiveSection('summary');
+          return;
+        }
+      } catch {
+        // Fallback offline a caché local
+      }
       const user = await authenticateUser(loginEmail, loginPassword);
       setCurrentUser(user);
       setActiveSection('summary');
@@ -229,7 +287,7 @@ export default function App() {
     e.preventDefault();
     setAuthError('');
     try {
-      const user = await registerNewUser({
+      const payload = {
         name: regName,
         email: regEmail,
         password: regPassword,
@@ -243,7 +301,10 @@ export default function App() {
         metabolismType: regMetabolism,
         goal: regGoal,
         medicalConditions: regConditions
-      });
+      };
+      // Sincroniza registro en Postgres/Spring Security (BCrypt + JWT) si el backend está online
+      apiRegister(payload).catch(() => {});
+      const user = await registerNewUser(payload);
       setCurrentUser(user);
       setRegStep(1);
       setActiveSection('summary');
@@ -264,9 +325,11 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    apiLogout();
     setCurrentSessionUser(null);
     setCurrentUser(null);
     setShowLanding(true);
+    navigate('/');
     setLoginEmail('');
     setLoginPassword('');
     setRegName('');
@@ -571,6 +634,7 @@ export default function App() {
       ...prev,
       mealLogs: [newEntry, ...(prev.mealLogs || [])]
     }));
+    apiCreateMeal(newEntry).catch(() => {});
     setMealSavedNotice('Comida guardada en tu seguimiento diario.');
     setTimeout(() => setMealSavedNotice(''), 3500);
   };
@@ -608,6 +672,7 @@ export default function App() {
   };
 
   const handleDeleteMealLog = (mealId) => {
+    apiDeleteMeal(mealId).catch(() => {});
     updateWorkspace(prev => ({
       ...prev,
       mealLogs: (prev.mealLogs || []).filter(m => m.id !== mealId)
@@ -641,6 +706,7 @@ export default function App() {
       ...prev,
       mealLogs: [newEntry, ...(prev.mealLogs || [])]
     }));
+    apiCreateMeal(newEntry).catch(() => {});
     setMealSavedNotice(`"${food.name}" (${scaled.grams}g · Nutri-Score ${food.nutriGrade}) agregado a tu día.`);
     setTimeout(() => setMealSavedNotice(''), 3500);
   };
@@ -1043,6 +1109,8 @@ export default function App() {
       waterGoalMl: Math.max(0, Number(profWaterGoal) || 0)
     });
     if (updated) {
+      apiUpdateProfile(updated).catch(() => {});
+      apiCreateProgress({ date: todayIso, weightKg: w, waterMl: waterTodayMl, note: 'Actualización de perfil' }).catch(() => {});
       setCurrentUser(updated);
       if (w > 0 && (workspace.weightHistory || []).length === 0) {
         updateWorkspace(prev => ({
@@ -1227,7 +1295,7 @@ export default function App() {
         userInitials={userInitials}
         currentUser={currentUser}
         themeMode={themeMode}
-        onToggleTheme={() => setThemeMode(prev => (prev === 'dark' ? 'light' : 'dark'))}
+        onToggleTheme={toggleThemeMode}
         onLogout={handleLogout}
       />
 
@@ -1355,190 +1423,38 @@ export default function App() {
               </div>
             )}
 
-            {/* ANILLO DE CALORÍAS (MYFITNESSPAL / LIFESUM) + MACROS DE COLOR + HIDRATACIÓN VISUAL */}
-            {(() => {
-              const radius = 64;
-              const circumference = 2 * Math.PI * radius;
-              const strokeOffset = circumference * (1 - Math.min(100, pctKcal) / 100);
-              const remainingToday = Math.max(0, goalKcal - consumedKcal);
-              const filledGlasses = Math.min(8, Math.floor(waterTodayMl / 250));
-
-              return (
-                <div className="dashboard-ring-grid">
-                  <div className="calorie-ring-card">
-                    <div className="ring-wrapper">
-                      <svg className="ring-svg" viewBox="0 0 156 156">
-                        <defs>
-                          <linearGradient id="nutriRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stopColor="#0f6b56" />
-                            <stop offset="100%" stopColor="#14b8a6" />
-                          </linearGradient>
-                        </defs>
-                        <circle
-                          cx="78"
-                          cy="78"
-                          r={radius}
-                          fill="none"
-                          stroke="#eaf0ee"
-                          strokeWidth="12"
-                        />
-                        <circle
-                          cx="78"
-                          cy="78"
-                          r={radius}
-                          fill="none"
-                          stroke="url(#nutriRingGrad)"
-                          strokeWidth="12"
-                          strokeLinecap="round"
-                          strokeDasharray={circumference}
-                          strokeDashoffset={strokeOffset}
-                          style={{ transition: 'stroke-dashoffset 0.4s ease' }}
-                        />
-                      </svg>
-                      <div className="ring-center">
-                        <span className="ring-kcal-big">
-                          {goalKcal > 0 ? remainingToday.toLocaleString() : consumedKcal}
-                        </span>
-                        <span className="ring-kcal-label">
-                          {goalKcal > 0 ? 'kcal restantes' : 'kcal hoy'}
-                        </span>
-                        <span style={{ fontSize: '0.68rem', color: 'var(--accent)', fontWeight: 600, marginTop: '2px' }}>
-                          {consumedKcal} / {goalKcal}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="macro-bars-stack">
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-                        <strong style={{ fontSize: '0.88rem' }}>Macronutrientes hoy</strong>
-                        <span className="streak-pill">Racha: {aiProgress.streakDays}d · {aiProgress.consistencyPct}%</span>
-                      </div>
-
-                      <div className="macro-bar-row">
-                        <div className="macro-bar-head">
-                          <span>Carbohidratos</span>
-                          <strong>{consumedCarbs}g / {goalCarbs}g</strong>
-                        </div>
-                        <div className="macro-track">
-                          <div className="macro-fill-carbs" style={{ width: `${pctCarbs}%` }} />
-                        </div>
-                      </div>
-
-                      <div className="macro-bar-row">
-                        <div className="macro-bar-head">
-                          <span>Proteínas</span>
-                          <strong>{consumedProtein}g / {goalProtein}g</strong>
-                        </div>
-                        <div className="macro-track">
-                          <div className="macro-fill-protein" style={{ width: `${pctProtein}%` }} />
-                        </div>
-                      </div>
-
-                      <div className="macro-bar-row">
-                        <div className="macro-bar-head">
-                          <span>Grasas saludables</span>
-                          <strong>{consumedFat}g / {goalFat}g</strong>
-                        </div>
-                        <div className="macro-track">
-                          <div className="macro-fill-fat" style={{ width: `${pctFat}%` }} />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="hydration-visual-card">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-                      <div>
-                        <strong style={{ fontSize: '0.9rem' }}>Hidratación visual (vasos de 250 ml)</strong>
-                        <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                          {waterTodayMl} ml / {goalWater || 2000} ml · Toca un vaso para registrar
-                        </div>
-                      </div>
-                      <span className="tag-pill">{filledGlasses} / 8 vasos</span>
-                    </div>
-
-                    <div className="water-drops-grid">
-                      {Array.from({ length: 8 }).map((_, idx) => {
-                        const isFilled = idx < filledGlasses;
-                        return (
-                          <button
-                            key={idx}
-                            type="button"
-                            className={`water-drop-btn ${isFilled ? 'filled' : ''}`}
-                            title={`${(idx + 1) * 250} ml`}
-                            onClick={() => {
-                              const targetMl = (idx + 1) * 250;
-                              const delta = targetMl === waterTodayMl ? -250 : targetMl - waterTodayMl;
-                              handleAdjustWater(delta);
-                            }}
-                          >
-                            💧
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
-                        <strong>{mealsToday.length}</strong> plato(s) hoy · País: <strong>{processCoach.country.name}</strong>
-                      </span>
-                      <button
-                        type="button"
-                        className="btn-solid"
-                        style={{ padding: '7px 12px', fontSize: '0.78rem' }}
-                        onClick={() => {
-                          setMealEntryMode('database');
-                          setActiveSection('meals');
-                        }}
-                      >
-                        + Buscar alimento (Yuka/Macros)
-                      </button>
-                    </div>
-
-                    {/* VENTANA DE CRONONUTRICIÓN / AYUNO INTELIGENTE (YAZIO · ESPEN) */}
-                    {(() => {
-                      const fs = workspace.fastingState || { active: false, startedAt: null, targetHours: 14 };
-                      const elapsedHrs =
-                        fs.active && fs.startedAt
-                          ? Math.max(0, (Date.now() - new Date(fs.startedAt).getTime()) / (1000 * 60 * 60))
-                          : 0;
-                      const fastPct = fs.active
-                        ? Math.min(100, Math.round((elapsedHrs / (fs.targetHours || 14)) * 100))
-                        : 0;
-                      return (
-                        <div
-                          style={{
-                            paddingTop: '10px',
-                            borderTop: '1px solid var(--border)',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            gap: '8px',
-                            flexWrap: 'wrap'
-                          }}
-                        >
-                          <div style={{ fontSize: '0.75rem' }}>
-                            <strong>Crononutrición / Ayuno ({fs.targetHours || 14}h):</strong>{' '}
-                            <span style={{ color: 'var(--text-secondary)' }}>
-                              {fs.active
-                                ? `${elapsedHrs.toFixed(1)}h transcurridas (${fastPct}%)`
-                                : 'Inactivo (reposo digestivo nocturno recomendado 12–14h)'}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            className="copilot-chip"
-                            onClick={() => handleToggleFastingWindow(fs.targetHours || 14)}
-                          >
-                            {fs.active ? 'Finalizar ventana' : 'Iniciar ventana 14h'}
-                          </button>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-              );
-            })()}
+            {/* ANILLO DE CALORÍAS + MACROS DE COLOR + HIDRATACIÓN VISUAL (COMPONENTES MODULARES) */}
+            <div className="dashboard-ring-grid">
+              <CalorieRing
+                goalKcal={goalKcal}
+                consumedKcal={consumedKcal}
+                pctKcal={pctKcal}
+                consumedCarbs={consumedCarbs}
+                goalCarbs={goalCarbs}
+                pctCarbs={pctCarbs}
+                consumedProtein={consumedProtein}
+                goalProtein={goalProtein}
+                pctProtein={pctProtein}
+                consumedFat={consumedFat}
+                goalFat={goalFat}
+                pctFat={pctFat}
+                streakDays={aiProgress.streakDays}
+                consistencyPct={aiProgress.consistencyPct}
+              />
+              <WaterGlasses
+                waterTodayMl={waterTodayMl}
+                goalWater={goalWater}
+                onAdjustWater={handleAdjustWater}
+                mealsCount={mealsToday.length}
+                countryName={processCoach.country.name}
+                onOpenFoodSearch={() => {
+                  setMealEntryMode('database');
+                  setActiveSection('meals');
+                }}
+                fastingState={workspace.fastingState}
+                onToggleFasting={handleToggleFastingWindow}
+              />
+            </div>
 
             {/* SUB-TABS COMPACTAS PARA MANTENER EL PANEL ROBUSTO Y SIN SCROLL EXCESIVO */}
             <div className="subtab-bar">

@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: ${PORT:8080}
 
 spring:
   application:
@@ -8,11 +8,16 @@ spring:
     multipart:
       max-file-size: 25MB
       max-request-size: 25MB
-
-  # Perfil por defecto: 'demo' usa H2 en memoria + motor híbrido vectorial listo sin requerir Docker,
-  # Cambia a 'pgvector' (SPRING_PROFILES_ACTIVE=pgvector) para usar PostgreSQL + pgvector en Docker.
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:demo}
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID:disabled-in-local}
+            client-secret: ${GOOGLE_CLIENT_SECRET:disabled-in-local}
+            scope: openid,profile,email
 
 ---
 spring:
@@ -24,9 +29,11 @@ spring:
     driver-class-name: org.h2.Driver
     username: sa
     password:
+  flyway:
+    enabled: false
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: create-drop
     show-sql: false
 
 ---
@@ -39,15 +46,25 @@ spring:
     driver-class-name: org.postgresql.Driver
     username: ${POSTGRES_USER:nutrirag_user}
     password: ${POSTGRES_PASSWORD:nutrirag_password}
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
 
-# Configuración del Motor RAG y Proveedores de IA (OpenAI / Gemini / Demo)
 nutrirag:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+  security:
+    jwt-secret: ${JWT_SECRET:NutriStudioSuperSecretKeyForJwtSigningAtLeast256BitsLong2026!}
+    access-token-expiration-ms: ${JWT_ACCESS_EXP_MS:900000}
+    refresh-token-expiration-ms: ${JWT_REFRESH_EXP_MS:604800000}
+    rate-limit-per-minute: ${RATE_LIMIT_PER_MINUTE:60}
   storage:
     temp-dir: ${java.io.tmpdir}/nutrirag-temp-uploads
     delete-after-indexing: true
@@ -55,7 +72,6 @@ nutrirag:
     target-tokens: 650
     overlap-tokens: 100
   ai:
-    # Opciones: DEMO, OPENAI, GEMINI
     provider: ${AI_PROVIDER:DEMO}
     openai-api-key: ${OPENAI_API_KEY:}
     openai-embedding-model: text-embedding-3-small
@@ -63,4 +79,3 @@ nutrirag:
     gemini-api-key: ${GEMINI_API_KEY:}
     gemini-embedding-model: text-embedding-004
     gemini-chat-model: gemini-2.5-flash
-
