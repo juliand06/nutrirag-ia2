@@ -30,7 +30,9 @@ import {
 import {
   computeAiProgressIntelligence,
   evaluateDailyMealsWithAi,
-  buildSmartShoppingList
+  buildSmartShoppingList,
+  computeAdaptiveTdeeCheckIn,
+  openPrintableClinicalReport
 } from './services/aiWorkflowEngine';
 import {
   GOAL_OPTIONS,
@@ -1857,6 +1859,11 @@ export default function App() {
     userProfile: currentUser,
     clinicalRecord
   });
+  const adaptiveCheckIn = computeAdaptiveTdeeCheckIn({
+    userProfile: currentUser,
+    workspace,
+    metrics: processCoach.metrics
+  });
 
   return (
     <div className="workspace-layout">
@@ -1940,7 +1947,26 @@ export default function App() {
                   {currentGoalLabel} · Peso actual: {currentUser.weightKg || 0} kg · Meta diaria: {goalKcal} kcal
                 </p>
               </div>
-              <div style={{ display: 'flex', gap: '10px' }}>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn-outline"
+                  onClick={() =>
+                    openPrintableClinicalReport({
+                      userProfile: currentUser,
+                      metrics: processCoach.metrics,
+                      countryName: processCoach.country.name,
+                      activeProtocols: userMemory.activeProtocols,
+                      clinicalRecord,
+                      clinicalRubric,
+                      adaptiveCheckIn,
+                      mealsToday,
+                      userMemory
+                    })
+                  }
+                >
+                  Exportar Reporte Clínico (PDF)
+                </button>
                 <button
                   type="button"
                   className="btn-outline"
@@ -2491,6 +2517,46 @@ export default function App() {
                     </div>
                   ))}
                 </div>
+
+                {/* MOTOR METABÓLICO ADAPTATIVO SEMANAL (ESTILO MACROFACTOR) */}
+                <div
+                  className="list-item-card"
+                  style={{
+                    marginTop: '14px',
+                    background: 'var(--accent-soft)',
+                    borderColor: 'var(--border-strong)',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '10px'
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: '220px' }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.82rem', color: 'var(--accent)' }}>
+                      {adaptiveCheckIn.headline}
+                    </div>
+                    <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                      {adaptiveCheckIn.explanation}
+                    </div>
+                  </div>
+                  {adaptiveCheckIn.ready && adaptiveCheckIn.deltaKcal !== 0 && (
+                    <button
+                      type="button"
+                      className="btn-solid"
+                      style={{ padding: '7px 12px', fontSize: '0.76rem' }}
+                      onClick={() => {
+                        const updated = updateUserProfile(currentUser.id, {
+                          dailyCalories: adaptiveCheckIn.suggestedCalories
+                        });
+                        if (updated) {
+                          setCurrentUser(updated);
+                          setProfCalories(String(adaptiveCheckIn.suggestedCalories));
+                        }
+                      }}
+                    >
+                      Aplicar ajuste ({adaptiveCheckIn.suggestedCalories} kcal)
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
             )}
@@ -2799,8 +2865,49 @@ export default function App() {
                 </form>
 
                 <div style={{ fontSize: '0.76rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>
-                  HISTORIAL DE PESO ({workspace.weightHistory?.length || 0})
+                  GRÁFICA Y HISTORIAL DE PESO ({workspace.weightHistory?.length || 0})
                 </div>
+                {(workspace.weightHistory || []).length >= 2 && (() => {
+                  const pts = [...workspace.weightHistory].slice(0, 8).reverse();
+                  const vals = pts.map(p => Number(p.weightKg) || 0);
+                  const minV = Math.min(...vals) - 1;
+                  const maxV = Math.max(...vals) + 1;
+                  const span = Math.max(1, maxV - minV);
+                  const polyPoints = vals
+                    .map((v, i) => {
+                      const x = Math.round((i / Math.max(1, vals.length - 1)) * 280 + 10);
+                      const y = Math.round(62 - ((v - minV) / span) * 48);
+                      return `${x},${y}`;
+                    })
+                    .join(' ');
+                  return (
+                    <div
+                      style={{
+                        background: 'var(--bg-page)',
+                        border: '1px solid var(--border)',
+                        borderRadius: '10px',
+                        padding: '8px 10px',
+                        marginBottom: '10px'
+                      }}
+                    >
+                      <svg viewBox="0 0 300 72" style={{ width: '100%', height: '66px', display: 'block' }}>
+                        <polyline
+                          fill="none"
+                          stroke="#0f6b56"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          points={polyPoints}
+                        />
+                        {vals.map((v, i) => {
+                          const x = Math.round((i / Math.max(1, vals.length - 1)) * 280 + 10);
+                          const y = Math.round(62 - ((v - minV) / span) * 48);
+                          return <circle key={i} cx={x} cy={y} r="3.5" fill="#0f6b56" />;
+                        })}
+                      </svg>
+                    </div>
+                  );
+                })()}
                 {(workspace.weightHistory || []).length === 0 ? (
                   <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                     0 registros de peso. Ingresa tu peso arriba para iniciar la gráfica de seguimiento.
@@ -3630,6 +3737,25 @@ export default function App() {
                     Monitoreo en vivo de tu proceso físico, gasto y rendimiento de la IA, y conexión entre tu historial relacional y las bases globales/país.
                   </p>
                 </div>
+                <button
+                  type="button"
+                  className="btn-solid"
+                  onClick={() =>
+                    openPrintableClinicalReport({
+                      userProfile: currentUser,
+                      metrics: processCoach.metrics,
+                      countryName: processCoach.country.name,
+                      activeProtocols: userMemory.activeProtocols,
+                      clinicalRecord,
+                      clinicalRubric,
+                      adaptiveCheckIn,
+                      mealsToday,
+                      userMemory
+                    })
+                  }
+                >
+                  Exportar Reporte Clínico (PDF)
+                </button>
               </div>
 
               <div className="stats-row">

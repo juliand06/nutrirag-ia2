@@ -220,3 +220,190 @@ export function buildSmartShoppingList(menu, countryName = 'tu país', budgetId 
     }))
   };
 }
+
+
+/**
+ * Motor Metabólico Adaptativo (estilo MacroFactor):
+ * Compara la tendencia real de peso registrado con el promedio calórico consumido
+ * y sugiere una recalibración semanal inteligente del gasto energético (GET adaptativo)
+ * para evitar estancamientos metabólicos.
+ */
+export function computeAdaptiveTdeeCheckIn({ userProfile, workspace, metrics }) {
+  const weights = Array.isArray(workspace?.weightHistory) ? workspace.weightHistory : [];
+  const meals = Array.isArray(workspace?.mealLogs) ? workspace.mealLogs : [];
+  const staticTdee = Number(metrics?.tdee || userProfile?.dailyCalories || 2000);
+  const currentGoalKcal = Number(userProfile?.dailyCalories || staticTdee);
+
+  if (weights.length < 2) {
+    return {
+      ready: false,
+      adaptiveTdee: staticTdee,
+      suggestedCalories: currentGoalKcal,
+      deltaKcal: 0,
+      headline: 'Check-in Metabólico Adaptativo (estilo MacroFactor)',
+      explanation:
+        'Registra al menos 2 controles de peso en días distintos para que la IA calcule tu gasto energético real adaptativo y recalibre tus calorías automáticamente.'
+    };
+  }
+
+  const latestW = Number(weights[0].weightKg || 0);
+  const prevW = Number(weights[Math.min(weights.length - 1, 4)].weightKg || latestW);
+  const weightDeltaKg = Number((latestW - prevW).toFixed(2));
+
+  // Promedio calórico de los días con registro reciente
+  const byDate = {};
+  meals.slice(0, 35).forEach(m => {
+    byDate[m.date] = (byDate[m.date] || 0) + (Number(m.totalCalories) || 0);
+  });
+  const dayValues = Object.values(byDate).filter(v => v > 400);
+  const avgIntake =
+    dayValues.length > 0
+      ? Math.round(dayValues.reduce((a, b) => a + b, 0) / dayValues.length)
+      : currentGoalKcal;
+
+  // Ajuste adaptativo suave (±150 kcal máx. por ciclo para proteger el metabolismo)
+  const goalId = userProfile?.goal || 'mantenimiento';
+  let deltaKcal = 0;
+  let explanation = 'Tu evolución de peso coincide con tu gasto estimado. Mantén tu meta actual.';
+
+  if (goalId === 'deficit_calorico' && weightDeltaKg >= 0) {
+    deltaKcal = -110;
+    explanation = `Tu peso reciente varió ${weightDeltaKg >= 0 ? '+' : ''}${weightDeltaKg} kg con un promedio de ~${avgIntake} kcal. Se sugiere un ajuste adaptativo de -110 kcal para reactivar pérdida de grasa sin perder músculo.`;
+  } else if (goalId === 'deficit_calorico' && weightDeltaKg < -1.2) {
+    deltaKcal = 100;
+    explanation = `Estás bajando muy rápido (${weightDeltaKg} kg). Para proteger tu masa muscular y evitar adaptación metabólica, la IA sugiere subir +100 kcal.`;
+  } else if (goalId === 'masa_muscular' && weightDeltaKg <= 0) {
+    deltaKcal = 130;
+    explanation = `Tu peso no ha subido (${weightDeltaKg} kg). Para impulsar hipertrofia limpia, la IA sugiere sumar +130 kcal enfocadas en carbohidratos complejos.`;
+  }
+
+  const adaptiveTdee = Math.max(1200, staticTdee + deltaKcal);
+  const suggestedCalories = Math.max(1250, currentGoalKcal + deltaKcal);
+
+  return {
+    ready: true,
+    adaptiveTdee,
+    suggestedCalories,
+    deltaKcal,
+    weightDeltaKg,
+    avgIntake,
+    headline:
+      deltaKcal === 0
+        ? `Metabolismo en equilibrio · GET Adaptativo: ${adaptiveTdee} kcal`
+        : `Ajuste Adaptativo IA sugerido: ${deltaKcal > 0 ? '+' : ''}${deltaKcal} kcal/día`,
+    explanation
+  };
+}
+
+/**
+ * Genera y abre un Reporte Clínico Nutricional Profesional listo para imprimir / guardar como PDF
+ * (estilo Nutrium / Cronometer Pro) con biomarcadores, rúbrica FHIR, metas y evolución.
+ */
+export function openPrintableClinicalReport({
+  userProfile,
+  metrics,
+  countryName,
+  activeProtocols,
+  clinicalRecord,
+  clinicalRubric,
+  adaptiveCheckIn,
+  mealsToday,
+  userMemory
+}) {
+  const today = new Date().toLocaleDateString('es-ES', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Reporte Clínico Nutricional — ${userProfile?.name || 'Paciente'}</title>
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; color: #10201b; padding: 32px; max-width: 860px; margin: 0 auto; line-height: 1.5; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #0f6b56; padding-bottom: 14px; margin-bottom: 22px; }
+    h1 { margin: 0; font-size: 20px; color: #0f6b56; }
+    h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em; color: #0f6b56; border-bottom: 1px solid #dde5e2; padding-bottom: 4px; margin-top: 22px; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 10px; }
+    .box { border: 1px solid #dde5e2; border-radius: 8px; padding: 10px 12px; background: #f8faf9; }
+    .label { font-size: 11px; color: #5c6e68; }
+    .val { font-size: 16px; font-weight: 700; margin-top: 2px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+    th, td { border: 1px solid #dde5e2; padding: 7px 10px; text-align: left; }
+    th { background: #eaf4f0; color: #0f6b56; }
+    .footer { margin-top: 28px; font-size: 11px; color: #6b7b75; border-top: 1px solid #dde5e2; padding-top: 10px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>NutriStudio AI — Reporte Clínico Nutricional</h1>
+      <div style="font-size:13px;color:#485b55;margin-top:4px;">
+        Paciente: <strong>${userProfile?.name || ''}</strong> (${userProfile?.email || ''}) · País: <strong>${countryName}</strong>
+      </div>
+    </div>
+    <div style="text-align:right;font-size:12px;color:#485b55;">
+      <div>Fecha: ${today}</div>
+      <div>Memoria IA: ${userMemory?.knowledgeScore || 0}%</div>
+    </div>
+  </div>
+
+  <h2>1. Perfil Biométrico y Metabólico Adaptativo</h2>
+  <div class="grid">
+    <div class="box"><div class="label">Peso / Estatura / Edad</div><div class="val">${userProfile?.weightKg || 0} kg · ${userProfile?.heightCm || 0} cm · ${userProfile?.age || 0} años</div></div>
+    <div class="box"><div class="label">TMB / GET / IMC</div><div class="val">${metrics ? `${metrics.bmr} / ${metrics.tdee} kcal · IMC ${metrics.bmi}` : 'No calculado'}</div></div>
+    <div class="box"><div class="label">Meta Diaria (Adaptativa: ${adaptiveCheckIn?.adaptiveTdee || 0} kcal)</div><div class="val">${userProfile?.dailyCalories || 0} kcal · P:${userProfile?.targetProtein || 0}g C:${userProfile?.targetCarbs || 0}g G:${userProfile?.targetFat || 0}g</div></div>
+  </div>
+
+  <h2>2. Protocolos Médicos Globales y Expediente HL7 FHIR</h2>
+  <p style="font-size:12px;">
+    <strong>Protocolos activos:</strong> ${activeProtocols?.length > 0 ? activeProtocols.map(p => `${p.label} (${p.source})`).join('; ') : 'Guías generales OMS/FAO/ESPEN'}.
+  </p>
+  ${
+    clinicalRecord
+      ? `<table>
+          <tr><th>Institución</th><th>Glucosa Ayunas</th><th>HbA1c</th><th>LDL / Triglicéridos</th><th>Presión Arterial</th><th>Concordancia Rúbrica</th></tr>
+          <tr>
+            <td>${clinicalRecord.institutionName}</td>
+            <td>${clinicalRecord.fastingGlucose} mg/dL</td>
+            <td>${clinicalRecord.hba1c}%</td>
+            <td>${clinicalRecord.ldlCholesterol} / ${clinicalRecord.triglycerides} mg/dL</td>
+            <td>${clinicalRecord.bloodPressureSys}/${clinicalRecord.bloodPressureDia} mmHg</td>
+            <td><strong>${clinicalRubric?.totalScore || 0}%</strong></td>
+          </tr>
+        </table>
+        <p style="font-size:12px;margin-top:8px;"><strong>Alergias:</strong> ${clinicalRecord.allergies} · <strong>Medicación:</strong> ${clinicalRecord.medications}</p>`
+      : '<p style="font-size:12px;color:#5c6e68;">Expediente clínico FHIR aún no sincronizado.</p>'
+  }
+
+  <h2>3. Registro de Comidas de Hoy (${mealsToday?.length || 0})</h2>
+  ${
+    mealsToday?.length > 0
+      ? `<table>
+          <tr><th>Tiempo</th><th>Plato / Alimento</th><th>Calorías</th><th>Proteína</th><th>Carbohidratos</th><th>Grasas</th></tr>
+          ${mealsToday
+            .map(
+              m =>
+                `<tr><td>${m.mealType}</td><td>${m.dishName}</td><td>${m.totalCalories} kcal</td><td>${m.proteinGrams}g</td><td>${m.carbsGrams}g</td><td>${m.fatGrams}g</td></tr>`
+            )
+            .join('')}
+        </table>`
+      : '<p style="font-size:12px;color:#5c6e68;">Sin comidas registradas en la fecha actual.</p>'
+  }
+
+  <div class="footer">
+    Documento generado automáticamente por NutriStudio AI (RAG Híbrido + Guías OMS/ADA/AHA-DASH/ISSN/ESPEN/KDIGO/EASL). Este reporte es una herramienta de apoyo nutricional y no sustituye el criterio diagnóstico de un médico o nutricionista tratante.
+  </div>
+  <script>window.onload = function() { window.print(); };</script>
+</body>
+</html>`;
+
+  const w = window.open('', '_blank', 'width=920,height=740');
+  if (w) {
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  }
+}
