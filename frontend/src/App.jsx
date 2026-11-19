@@ -128,6 +128,7 @@ export default function App() {
 
   // Estado de Autenticación y Cuenta Activa
   const [currentUser, setCurrentUser] = useState(() => getCurrentSessionUser());
+  const [showLanding, setShowLanding] = useState(true);
   const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
   const [authError, setAuthError] = useState('');
 
@@ -319,6 +320,7 @@ export default function App() {
   const handleLogout = () => {
     setCurrentSessionUser(null);
     setCurrentUser(null);
+    setShowLanding(true);
     setLoginEmail('');
     setLoginPassword('');
     setRegName('');
@@ -1101,9 +1103,201 @@ export default function App() {
   };
 
   // ============================================================================
-  // VISTA 0: PANTALLA DE INICIO CON IMAGEN HERO + ONBOARDING EN 3 PASOS
+  // VISTA 0: PORTADA PROFESIONAL DE NUTRICIÓN + LOGIN / ONBOARDING EN 3 PASOS
   // ============================================================================
   if (!currentUser || !workspace) {
+    if (showLanding) {
+      return (
+        <div className="landing-page">
+          <header className="landing-nav">
+            <div className="auth-brand" style={{ marginBottom: 0 }}>
+              <div className="auth-mark">N</div>
+              <span className="auth-brand-name" style={{ fontSize: '1.12rem' }}>
+                NutriStudio AI
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <button
+                type="button"
+                className="btn-outline"
+                onClick={() => {
+                  setAuthMode('login');
+                  setShowLanding(false);
+                }}
+              >
+                Iniciar sesión
+              </button>
+              <button
+                type="button"
+                className="btn-solid"
+                onClick={() => {
+                  setAuthMode('register');
+                  setRegStep(1);
+                  setShowLanding(false);
+                }}
+              >
+                Comenzar gratis
+              </button>
+            </div>
+          </header>
+
+          <section className="landing-hero">
+            <div>
+              <span className="tag-pill">
+                Plataforma Clínica de Nutrición · IA + Medicina Global + Productividad Local
+              </span>
+              <h1 className="landing-hero-heading">
+                Nutre tu cuerpo con <span>ciencia e inteligencia</span>, no con dietas imposibles.
+              </h1>
+              <p className="landing-hero-lead">
+                “El verdadero cambio comienza cuando entiendes tu metabolismo, aprovechas los alimentos reales de tu país y cuentas con una IA clínica que te acompaña en cada comida.”
+              </p>
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn-solid"
+                  style={{ padding: '12px 22px', fontSize: '0.92rem' }}
+                  onClick={() => {
+                    setAuthMode('register');
+                    setRegStep(1);
+                    setShowLanding(false);
+                  }}
+                >
+                  Empezar mi plan personalizado →
+                </button>
+                <button
+                  type="button"
+                  className="btn-outline"
+                  style={{ padding: '12px 20px', fontSize: '0.92rem' }}
+                  onClick={() => {
+                    setAuthMode('login');
+                    setShowLanding(false);
+                  }}
+                >
+                  Ya tengo cuenta
+                </button>
+              </div>
+              <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', marginTop: '22px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                <span>✓ Anillo calórico y macros</span>
+                <span>✓ Escáner de platos y Nutri-Score A–E</span>
+                <span>✓ Protocolos OMS · ADA · DASH · ESPEN</span>
+              </div>
+            </div>
+
+            <div className="landing-hero-img-wrap">
+              <img src="/hero-nutrition.jpg" alt="Alimentación saludable balanceada en NutriStudio AI" />
+              <div className="landing-floating-stat">
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                    Seguimiento inteligente 360°
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                    Calorías · Micronutrientes · Pronóstico corporal IA a 30 días
+                  </div>
+                </div>
+                <span className="nutri-badge nutri-grade-A">Nutri-Score A</span>
+              </div>
+            </div>
+          </section>
+
+          <section className="landing-section">
+            <div style={{ textAlign: 'center', maxWidth: '680px', margin: '0 auto' }}>
+              <span className="tag-pill">Diseñada para acompañarte todos los días</span>
+              <h2 style={{ fontSize: '1.65rem', fontWeight: 700, marginTop: '10px', letterSpacing: '-0.025em' }}>
+                Todo lo que tu salud necesita, en una sola plataforma
+              </h2>
+              <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginTop: '6px' }}>
+                Inspirada en los mejores estándares internacionales de nutrición y potenciada con IA clínica personalizada.
+              </p>
+            </div>
+
+            <div className="landing-cards-grid">
+              <article className="landing-visual-card">
+                <img src="/landing-meal-scan.jpg" alt="Escaneo inteligente de platos con Visión IA" />
+                <div className="landing-visual-card-body">
+                  <span className="nutri-badge nutri-grade-A" style={{ alignSelf: 'flex-start' }}>
+                    Visión IA + Yuka
+                  </span>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>
+                    “Una foto basta para conocer tus calorías, macros y calidad real.”
+                  </h3>
+                  <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                    Analiza tus platos al instante, compara en nuestra base de 40+ alimentos con Nutri-Score A–E y recibe sustituciones saludables en tiempo real.
+                  </p>
+                </div>
+              </article>
+
+              <article className="landing-visual-card">
+                <img src="/landing-wellness.jpg" alt="Alimentos reales y productividad alimenticia por país" />
+                <div className="landing-visual-card-body">
+                  <span className="nutri-badge nutri-grade-B" style={{ alignSelf: 'flex-start' }}>
+                    Productividad Local
+                  </span>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>
+                    “Comer saludable no tiene que ser costoso ni lejano a tu cultura.”
+                  </h3>
+                  <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                    Adaptamos menús automáticos y tu lista de mercado semanal a los alimentos más nutritivos y accesibles de tu país y presupuesto.
+                  </p>
+                </div>
+              </article>
+
+              <article className="landing-visual-card">
+                <img src="/hero-nutrition.jpg" alt="Medicina nutricional especializada y sincronización clínica" />
+                <div className="landing-visual-card-body">
+                  <span className="nutri-badge nutri-grade-A" style={{ alignSelf: 'flex-start' }}>
+                    Medicina Clínica · HL7 FHIR
+                  </span>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>
+                    “Una IA que conoce tu cuerpo, tus exámenes y tu progreso.”
+                  </h3>
+                  <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                    Respaldada por guías OMS, ADA, AHA/DASH, ESPEN y KDIGO, con memoria personalizada y sincronización clínica por correo bajo consentimiento.
+                  </p>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section className="landing-quote-band">
+            <div className="landing-quote-inner">
+              <div style={{ fontSize: '1.35rem', fontWeight: 700, maxWidth: '720px', margin: '0 auto', lineHeight: 1.35 }}>
+                “No se trata de comer menos, sino de darle a tu metabolismo exactamente lo que necesita hoy.”
+              </div>
+              <p style={{ fontSize: '0.9rem', opacity: 0.9, marginTop: '10px', marginBottom: '22px' }}>
+                Registra tu edad, peso, estatura y objetivo en 3 pasos rápidos y activa tu Copiloto IA ahora mismo.
+              </p>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn-outline"
+                  style={{ background: '#ffffff', color: '#0f6b56', borderColor: '#ffffff', fontWeight: 600, padding: '11px 22px' }}
+                  onClick={() => {
+                    setAuthMode('register');
+                    setRegStep(1);
+                    setShowLanding(false);
+                  }}
+                >
+                  Crear mi cuenta en 3 pasos →
+                </button>
+                <button
+                  type="button"
+                  className="btn-outline"
+                  style={{ background: 'rgba(255,255,255,0.14)', color: '#ffffff', borderColor: 'rgba(255,255,255,0.4)', padding: '11px 20px' }}
+                  onClick={() => {
+                    setAuthMode('login');
+                    setShowLanding(false);
+                  }}
+                >
+                  Iniciar sesión
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      );
+    }
+
     const existingUsers = loadUsers();
     const regPreview = calculateRecommendedTargets({
       weightKg: regWeight,
@@ -1178,6 +1372,14 @@ export default function App() {
         {/* PANEL DERECHO: INICIO DE SESIÓN O WIZARD DE BIENVENIDA EN 3 PASOS */}
         <section className="auth-form-panel">
           <div className="auth-card-wide">
+            <button
+              type="button"
+              className="btn-ghost"
+              style={{ padding: '4px 0', marginBottom: '10px', fontSize: '0.78rem' }}
+              onClick={() => setShowLanding(true)}
+            >
+              ← Volver a la portada
+            </button>
             <h2 className="auth-title">
               {authMode === 'login' ? 'Bienvenido de nuevo' : 'Personalicemos tu plan nutricional'}
             </h2>
