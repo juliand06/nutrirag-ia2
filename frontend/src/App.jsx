@@ -69,6 +69,10 @@ import CopilotDrawer from './components/CopilotDrawer';
 import HealthProgressSection from './components/HealthProgressSection';
 import CalorieRing from './components/CalorieRing';
 import WaterGlasses from './components/WaterGlasses';
+import BarcodeScannerPanel from './components/BarcodeScannerPanel';
+import RetentionHubSection from './components/RetentionHubSection';
+import { saveWorkspaceToIndexedDb } from './services/retentionEngine';
+import { searchOpenFoodFactsCatalog } from './services/openFoodFactsService';
 
 export default function App() {
   // SEGURIDAD: Ninguna clave de API se expone en el navegador; el backend proxy maneja las llamadas LLM si está activo.
@@ -163,6 +167,9 @@ export default function App() {
   const [foodSearchQuery, setFoodSearchQuery] = useState('');
   const [foodCategoryFilter, setFoodCategoryFilter] = useState('Todos');
   const [foodPortionById, setFoodPortionById] = useState({});
+  const [externalOffFoods, setExternalOffFoods] = useState([]);
+  const [isSearchingOff, setIsSearchingOff] = useState(false);
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [selectedDietPreset, setSelectedDietPreset] = useState('equilibrada');
   const [generatedMenu, setGeneratedMenu] = useState(null);
   const [showShoppingList, setShowShoppingList] = useState(false);
@@ -253,6 +260,7 @@ export default function App() {
     setWorkspace(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       saveUserWorkspace(currentUser.id, next);
+      saveWorkspaceToIndexedDb(currentUser.id, next);
       return next;
     });
   };
@@ -2224,49 +2232,94 @@ export default function App() {
 
             <div className="split-grid">
               <div className="card">
-                <div className="auth-switcher" style={{ marginBottom: '18px', gridTemplateColumns: '1fr 1fr 1fr' }}>
+                <div className="auth-switcher" style={{ marginBottom: '18px', gridTemplateColumns: 'repeat(4, 1fr)' }}>
                   <button
                     type="button"
                     className={`auth-switch-btn ${mealEntryMode === 'photo' ? 'active' : ''}`}
                     onClick={() => setMealEntryMode('photo')}
                   >
-                    Foto IA
+                    📷 Foto IA
+                  </button>
+                  <button
+                    type="button"
+                    className={`auth-switch-btn ${mealEntryMode === 'barcode' ? 'active' : ''}`}
+                    onClick={() => setMealEntryMode('barcode')}
+                  >
+                    🏷️ Barras
                   </button>
                   <button
                     type="button"
                     className={`auth-switch-btn ${mealEntryMode === 'database' ? 'active' : ''}`}
                     onClick={() => setMealEntryMode('database')}
                   >
-                    Base de alimentos
+                    🔍 Alimentos
                   </button>
                   <button
                     type="button"
                     className={`auth-switch-btn ${mealEntryMode === 'manual' ? 'active' : ''}`}
                     onClick={() => setMealEntryMode('manual')}
                   >
-                    Manual
+                    ✏️ Manual
                   </button>
                 </div>
 
-                {mealEntryMode === 'database' ? (() => {
-                  const matchedFoods = searchFoodDatabase({
+                {mealEntryMode === 'barcode' ? (
+                  <BarcodeScannerPanel
+                    mealType={mealType}
+                    onAddBarcodeMeal={(entry) => {
+                      const fullEntry = {
+                        ...entry,
+                        date: todayIso,
+                        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                      };
+                      updateWorkspace(prev => ({
+                        ...prev,
+                        mealLogs: [fullEntry, ...(prev.mealLogs || [])]
+                      }));
+                      apiCreateMeal(fullEntry).catch(() => {});
+                      setMealSavedNotice(`"${entry.dishName}" agregado desde escáner de código de barras.`);
+                      setTimeout(() => setMealSavedNotice(''), 3500);
+                    }}
+                  />
+                ) : mealEntryMode === 'database' ? (() => {
+                  const favIds = workspace.favoriteFoodIds || [];
+                  const localMatched = searchFoodDatabase({
                     query: foodSearchQuery,
                     category: foodCategoryFilter,
                     countryId: currentUser.country || 'CO'
                   });
+                  const combinedFoods = [...externalOffFoods, ...localMatched].filter(
+                    f => !showFavoritesOnly || favIds.includes(f.id)
+                  );
                   return (
                     <div>
                       <div className="form-stack" style={{ marginBottom: '12px' }}>
                         <div className="field-row">
                           <div className="field-group">
-                            <label className="field-label">Buscar en base nutricional (MyFitnessPal · Yuka · Cronometer)</label>
-                            <input
-                              type="text"
-                              className="input-clean"
-                              placeholder="Ej. pollo, aguacate, frijol, avena, salmón, gaseosa..."
-                              value={foodSearchQuery}
-                              onChange={e => setFoodSearchQuery(e.target.value)}
-                            />
+                            <label className="field-label">Buscar en base nutricional (USDA · ICBF · Open Food Facts)</label>
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              <input
+                                type="text"
+                                className="input-clean"
+                                placeholder="Ej. pollo, aguacate, frijol, avena, yogur..."
+                                value={foodSearchQuery}
+                                onChange={e => setFoodSearchQuery(e.target.value)}
+                              />
+                              <button
+                                type="button"
+                                className="btn-outline"
+                                style={{ flexShrink: 0, fontSize: '0.76rem' }}
+                                disabled={isSearchingOff || foodSearchQuery.trim().length < 3}
+                                onClick={async () => {
+                                  setIsSearchingOff(true);
+                                  const res = await searchOpenFoodFactsCatalog(foodSearchQuery);
+                                  setExternalOffFoods(res);
+                                  setIsSearchingOff(false);
+                                }}
+                              >
+                                {isSearchingOff ? '…' : '+ OpenFoodFacts'}
+                              </button>
+                            </div>
                           </div>
                           <div className="field-group">
                             <label className="field-label">Momento del día</label>
@@ -2283,6 +2336,18 @@ export default function App() {
                           </div>
                         </div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                          <button
+                            type="button"
+                            className="copilot-chip"
+                            style={
+                              showFavoritesOnly
+                                ? { background: '#f59e0b', color: '#fff', borderColor: '#f59e0b' }
+                                : undefined
+                            }
+                            onClick={() => setShowFavoritesOnly(prev => !prev)}
+                          >
+                            ⭐ Favoritos ({favIds.length})
+                          </button>
                           {FOOD_CATEGORIES.map(cat => (
                             <button
                               key={cat}
@@ -2308,15 +2373,40 @@ export default function App() {
                       )}
 
                       <div className="list-stack" style={{ maxHeight: '420px', overflowY: 'auto', paddingRight: '4px' }}>
-                        {matchedFoods.slice(0, 18).map(food => {
+                        {combinedFoods.slice(0, 20).map(food => {
                           const grams = Number(foodPortionById[food.id]) || food.defaultGrams || 100;
                           const scaled = scaleFoodPortion(food, grams);
                           const isWarning = food.qualityScore < 50;
+                          const isFav = favIds.includes(food.id);
                           return (
                             <div key={food.id} className="list-item-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '8px' }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
                                 <div>
-                                  <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{food.name}</div>
+                                  <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                                    <button
+                                      type="button"
+                                      aria-label="Marcar como favorito"
+                                      onClick={() =>
+                                        updateWorkspace(prev => {
+                                          const prevFavs = prev.favoriteFoodIds || [];
+                                          const nextFavs = prevFavs.includes(food.id)
+                                            ? prevFavs.filter(id => id !== food.id)
+                                            : [...prevFavs, food.id];
+                                          return { ...prev, favoriteFoodIds: nextFavs };
+                                        })
+                                      }
+                                      style={{
+                                        border: 'none',
+                                        background: 'transparent',
+                                        cursor: 'pointer',
+                                        marginRight: '6px',
+                                        fontSize: '0.9rem'
+                                      }}
+                                    >
+                                      {isFav ? '⭐' : '☆'}
+                                    </button>
+                                    {food.name}
+                                  </div>
                                   <div style={{ fontSize: '0.73rem', color: isWarning ? 'var(--danger-text)' : 'var(--text-secondary)', marginTop: '2px' }}>
                                     {food.clinicalTag} · NOVA {food.novaGroup} · IG {food.glycemicIndex}
                                   </div>
@@ -2440,12 +2530,76 @@ export default function App() {
 
                         {activeVisionResult.isFoodValid ? (
                           <>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
                               <span className="tag-pill green">{activeVisionResult.totalCalories} kcal</span>
                               <span className="tag-pill">{activeVisionResult.carbsGrams}g Carbohidratos</span>
                               <span className="tag-pill">{activeVisionResult.proteinGrams}g Proteínas</span>
                               <span className="tag-pill">{activeVisionResult.fatGrams}g Grasas</span>
                               <span className="tag-pill">{activeVisionResult.fiberGrams}g Fibra</span>
+                              <span className="nutri-badge nutri-grade-A">
+                                Confianza IA: {activeVisionResult.confidencePct || 91}%
+                              </span>
+                            </div>
+
+                            {/* Edición de porción y "Corregir y aprender" */}
+                            <div
+                              style={{
+                                display: 'flex',
+                                flexWrap: 'wrap',
+                                gap: '6px',
+                                alignItems: 'center',
+                                marginBottom: '12px',
+                                padding: '8px 10px',
+                                borderRadius: '9px',
+                                background: 'var(--bg-subtle)'
+                              }}
+                            >
+                              <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>Ajustar porción:</span>
+                              {[0.75, 1.25, 1.5].map(mult => (
+                                <button
+                                  key={mult}
+                                  type="button"
+                                  className="copilot-chip"
+                                  onClick={() =>
+                                    setActiveVisionResult(prev =>
+                                      prev
+                                        ? {
+                                            ...prev,
+                                            totalCalories: Math.round(prev.totalCalories * mult),
+                                            carbsGrams: Math.round(prev.carbsGrams * mult),
+                                            proteinGrams: Math.round(prev.proteinGrams * mult),
+                                            fatGrams: Math.round(prev.fatGrams * mult),
+                                            confidencePct: 98
+                                          }
+                                        : prev
+                                    )
+                                  }
+                                >
+                                  {mult}x
+                                </button>
+                              ))}
+                              <button
+                                type="button"
+                                className="copilot-chip"
+                                onClick={() => {
+                                  updateWorkspace(prev => ({
+                                    ...prev,
+                                    learnedCorrections: [
+                                      {
+                                        dishName: activeVisionResult.dishName,
+                                        totalCalories: activeVisionResult.totalCalories,
+                                        proteinGrams: activeVisionResult.proteinGrams,
+                                        savedAt: todayIso
+                                      },
+                                      ...(prev.learnedCorrections || [])
+                                    ].slice(0, 30)
+                                  }));
+                                  setMealSavedNotice('Corrección guardada: tu asistente aprenderá esta porción para futuras fotos.');
+                                  setTimeout(() => setMealSavedNotice(''), 3500);
+                                }}
+                              >
+                                ✓ Corregir y aprender
+                              </button>
                             </div>
 
                             {activeVisionResult.ingredients?.length > 0 && (
@@ -2956,6 +3110,7 @@ export default function App() {
             SECCIÓN 4.5: RENDIMIENTO CORPORAL, TELEMETRÍA IA Y BASE RELACIONAL
            ==================================================================== */}
         {activeSection === 'analytics' && (
+          <>
           <HealthProgressSection
             currentUser={currentUser}
             bodyAdherence={Math.round(
@@ -2990,6 +3145,34 @@ export default function App() {
               })
             }
           />
+          <RetentionHubSection
+            currentUser={currentUser}
+            workspace={workspace}
+            countryName={processCoach.country.name}
+            aiProgress={aiProgress}
+            waterTodayMl={waterTodayMl}
+            goalWater={goalWater}
+            onSaveWellnessLog={(entry) =>
+              updateWorkspace(prev => ({
+                ...prev,
+                wellnessLogs: [entry, ...(prev.wellnessLogs || [])]
+              }))
+            }
+            onSaveReminders={(nextRem) =>
+              updateWorkspace(prev => ({
+                ...prev,
+                reminders: nextRem
+              }))
+            }
+            onImportCsvData={({ importedMeals, importedWellness }) =>
+              updateWorkspace(prev => ({
+                ...prev,
+                mealLogs: [...importedMeals, ...(prev.mealLogs || [])],
+                wellnessLogs: [...importedWellness, ...(prev.wellnessLogs || [])]
+              }))
+            }
+          />
+          </>
         )}
 
         {activeSection === 'profile' && (

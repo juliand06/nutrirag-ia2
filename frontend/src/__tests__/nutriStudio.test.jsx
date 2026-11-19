@@ -6,6 +6,8 @@ import LandingPage from '../components/LandingPage';
 import { registerNewUser, authenticateUser, loadUsers } from '../services/userStorage';
 import { searchFoodDatabase, scaleFoodPortion, generateDailyMenuFromDatabase } from '../services/foodDatabase';
 import { evaluateNutritionGuardrail } from '../services/nutriRagEngine';
+import { parseNutritionCsvImport } from '../services/openFoodFactsService';
+import { computeGamificationState, computeWellnessCorrelations } from '../services/retentionEngine';
 
 describe('NutriStudio AI — Fase 1 Seguridad, Datos y UI', () => {
   beforeEach(() => {
@@ -67,5 +69,27 @@ describe('NutriStudio AI — Fase 1 Seguridad, Datos y UI', () => {
 
     render(<LandingPage onOpenLogin={() => {}} onOpenRegister={() => {}} />);
     expect(screen.getByText(/Nutre tu cuerpo con/i)).toBeInTheDocument();
+  });
+
+  it('importa archivos CSV estilo MyFitnessPal/Google Fit y calcula correlaciones + gamificación', () => {
+    const csv = 'Date,Food,Calories,Carbs,Protein,Fat,Steps\n2026-11-19,Pollo con quinua,540,42,44,16,8200';
+    const { importedMeals, importedWellness } = parseNutritionCsvImport(csv);
+    expect(importedMeals).toHaveLength(1);
+    expect(importedMeals[0].totalCalories).toBe(540);
+    expect(importedWellness[0].steps).toBe(8200);
+
+    const gami = computeGamificationState({
+      workspace: { mealLogs: importedMeals, wellnessLogs: importedWellness },
+      aiProgress: { streakDays: 3 },
+      waterTodayMl: 1800,
+      goalWater: 2000
+    });
+    expect(gami.xp).toBeGreaterThan(100);
+
+    const corrs = computeWellnessCorrelations({
+      wellnessLogs: [{ date: '2026-11-19', sleepHours: 5.5, steps: 8200, digestiveNote: 'Normal' }],
+      mealLogs: importedMeals
+    });
+    expect(corrs.some(c => c.includes('Sueño vs. Apetito'))).toBe(true);
   });
 });
