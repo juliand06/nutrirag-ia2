@@ -1,3 +1,5 @@
+import { getMetabolismProfile, getSexProfile } from './countryNutritionData';
+
 const USERS_KEY = 'nutristudio_users_v3';
 const SESSION_KEY = 'nutristudio_session_v3';
 const WORKSPACE_PREFIX = 'nutristudio_workspace_v3_';
@@ -119,6 +121,12 @@ export function registerNewUser({ name, email, password }) {
     weightKg: 0,
     heightCm: 0,
     age: 0,
+    sex: 'no_especificado',
+    metabolismType: 'equilibrado',
+    country: 'CO',
+    budgetTier: 'equilibrado',
+    medicalConditions: [],
+    physicalNotes: '',
     activityLevel: 'moderado',
     dailyCalories: 0,
     targetCarbs: 0,
@@ -135,15 +143,26 @@ export function registerNewUser({ name, email, password }) {
   return newUser;
 }
 
-export function calculateRecommendedTargets({ weightKg, heightCm, age, activityLevel, goal }) {
+export function calculateRecommendedTargets({
+  weightKg,
+  heightCm,
+  age,
+  sex = 'no_especificado',
+  metabolismType = 'equilibrado',
+  activityLevel,
+  goal
+}) {
   const w = Number(weightKg) || 0;
   const h = Number(heightCm) || 0;
   const a = Number(age) || 0;
   if (w <= 0 || h <= 0 || a <= 0) {
     return null;
   }
-  // Ecuación de Mifflin-St Jeor promedio + factor de actividad
-  const bmr = 10 * w + 6.25 * h - 5 * a;
+  const sexObj = getSexProfile(sex);
+  const metaObj = getMetabolismProfile(metabolismType);
+
+  // Ecuación clínica Mifflin-St Jeor ajustada por sexo biológico y tipo de metabolismo
+  const bmr = Math.max(950, Math.round((10 * w + 6.25 * h - 5 * a + sexObj.bmrOffset) * metaObj.factor));
   const mult =
     activityLevel === 'sedentario'
       ? 1.2
@@ -152,14 +171,22 @@ export function calculateRecommendedTargets({ weightKg, heightCm, age, activityL
         : activityLevel === 'intenso'
           ? 1.725
           : 1.55;
+  const tdee = Math.round(bmr * mult);
   const goalObj = GOAL_OPTIONS.find(g => g.id === goal) || GOAL_OPTIONS[1];
-  const dailyCalories = Math.max(1200, Math.round(bmr * mult + goalObj.kcalFactor));
-  const targetCarbs = Math.round((dailyCalories * goalObj.carbsRatio) / 4);
-  const targetProtein = Math.round((dailyCalories * goalObj.proteinRatio) / 4);
-  const targetFat = Math.round((dailyCalories * goalObj.fatRatio) / 9);
+  const dailyCalories = Math.max(1200, Math.round(tdee + goalObj.kcalFactor));
+
+  const carbsRatio = Math.max(0.2, Math.min(0.58, goalObj.carbsRatio + metaObj.carbsDelta));
+  const proteinRatio = Math.max(0.22, Math.min(0.4, goalObj.proteinRatio + metaObj.proteinDelta));
+  const fatRatio = Math.max(0.2, 1 - carbsRatio - proteinRatio);
+
+  const targetCarbs = Math.round((dailyCalories * carbsRatio) / 4);
+  const targetProtein = Math.round((dailyCalories * proteinRatio) / 4);
+  const targetFat = Math.round((dailyCalories * fatRatio) / 9);
   const waterGoalMl = Math.round(w * 35);
 
   return {
+    bmr,
+    tdee,
     dailyCalories,
     targetCarbs,
     targetProtein,

@@ -1,4 +1,32 @@
 // Motor de Asesoría Nutricional + Búsqueda Híbrida RAG (Vector + Léxico) + Visión Multimodal
+import {
+  buildCountryRagDocument,
+  getCountryProfile,
+  getBudgetProfile,
+  getMetabolismProfile,
+  computeMetabolicMetrics
+} from './countryNutritionData';
+import { GLOBAL_MEDICAL_RAG_DOCUMENTS } from './clinicalKnowledgeBase';
+
+// Gobernanza y Presupuesto de Tokens para uso diario a largo plazo (evita fatiga de contexto y sobrecosto)
+export const TOKEN_GOVERNANCE = {
+  MAX_CONTEXT_TOKENS: 900,
+  MAX_OUTPUT_TOKENS: 420,
+  DAILY_TOKEN_BUDGET: 12000
+};
+
+const QUERY_RESPONSE_CACHE = new Map();
+
+export function estimateTokens(text) {
+  if (!text) return 0;
+  return Math.max(1, Math.ceil(String(text).length / 4));
+}
+
+function trimToTokenBudget(text, maxTokens) {
+  const maxChars = maxTokens * 4;
+  if (!text || text.length <= maxChars) return text || '';
+  return text.slice(0, maxChars - 3).trim() + '...';
+}
 
 const INITIAL_DOCUMENTS = [
   {
@@ -137,7 +165,13 @@ const NUTRITION_KEYWORDS = [
   'vegetariano', 'gluten', 'lactosa', 'pdf', 'documento', 'plan', 'guia', 'tabla',
   'hola', 'buenos', 'buenas', 'gracias', 'ayuda', 'macro', 'menu', 'hambre', 'saciedad',
   'energia', 'entrenamiento', 'ejercicio', 'gimnasio', 'postreno', 'preentreno', 'suplemento',
-  'creatina', 'meta', 'objetivo', 'seguimiento', 'progreso', 'hoy', 'falta', 'recomienda'
+  'creatina', 'meta', 'objetivo', 'seguimiento', 'progreso', 'hoy', 'falta', 'recomienda',
+  'pais', 'colombia', 'mexico', 'peru', 'argentina', 'chile', 'ecuador', 'espana', 'estados unidos',
+  'productividad', 'local', 'presupuesto', 'economico', 'barato', 'proceso', 'acompanamiento',
+  'nopal', 'amaranto', 'yuca', 'guayaba', 'camote', 'palta', 'jurel', 'chochos', 'sardina', 'zapallo', 'arepa',
+  'diabetes', 'prediabetes', 'hipertension', 'presion', 'gastritis', 'colon', 'anemia', 'fatiga',
+  'cansancio', 'sodio', 'potasio', 'dash', 'ada', 'oms', 'issn', 'medico', 'clinico', 'condicion',
+  'memoria', 'historial', 'evolucion', 'tendencia', 'conoces', 'habito', 'sueno', 'cortisol'
 ];
 
 const OFF_TOPIC_TRIGGERS = [
@@ -233,9 +267,14 @@ export function evaluateNutritionGuardrail(question) {
   return { allowed: true, calmMessage: null };
 }
 
-function buildSmartLocalSynthesis(question, topRefs, userProfile, dailyTracking, hasUserDocs) {
+function buildSmartLocalSynthesis(question, topRefs, userProfile, dailyTracking, hasUserDocs, userMemory) {
   const normQ = normalizeText(question);
   const name = userProfile?.name ? userProfile.name.split(' ')[0] : '';
+  const country = getCountryProfile(userProfile?.country || 'CO');
+  const budget = getBudgetProfile(userProfile?.budgetTier || 'equilibrado');
+  const meta = getMetabolismProfile(userProfile?.metabolismType || 'equilibrado');
+  const metrics = computeMetabolicMetrics(userProfile);
+
   const goalKcal = Number(userProfile?.dailyCalories || 0);
   const goalCarbs = Number(userProfile?.targetCarbs || 0);
   const goalProt = Number(userProfile?.targetProtein || 0);
@@ -249,25 +288,54 @@ function buildSmartLocalSynthesis(question, topRefs, userProfile, dailyTracking,
 
   const lines = [];
 
-  if (normQ.includes('cena') || normQ.includes('noche')) {
+  if (
+    normQ.includes('pais') ||
+    normQ.includes('productividad') ||
+    normQ.includes('economico') ||
+    normQ.includes('presupuesto') ||
+    normQ.includes('local') ||
+    normQ.includes(normalizeText(country.name))
+  ) {
     lines.push(
-      `Para una **cena ligera y equilibrada**${name ? `, ${name},` : ''} lo ideal es priorizar proteína de fácil digestión acompañada de vegetales fibrosos y una porción moderada de carbohidratos complejos (máximo 35–40g netos) para mantener estable la glucosa nocturna:`
+      `### Guía basada en la productividad alimenticia de **${country.name}** (Presupuesto: ${budget.id})`
     );
+    lines.push(`- **Plus nutricional de ${country.name}:** ${country.nutritionalPlus}`);
+    const topLocal = country.foods
+      .slice(0, 4)
+      .map(
+        f =>
+          `- **${f.name}:** ${f.kcal100g} kcal · ${f.protein100g}g proteína · ${f.carbs100g}g carbs — *${f.plus}*`
+      );
+    lines.push(topLocal.join('\n'));
+    lines.push(`- **Plato recomendado hoy con ingredientes locales:** ${country.mealBlueprints.almuerzo}`);
+  } else if (normQ.includes('metabolismo') || normQ.includes('tmb') || normQ.includes('proceso')) {
     lines.push(
-      `- **Opción 1 (Rica en Omega-3):** 150g de filete de salmón o pescado blanco al horno + 100g de quinua o batata + brócoli y espárragos al vapor (~480 kcal · 34g carbohidratos · 38g proteína).`
+      `### Acompañamiento de tu Proceso según tu Metabolismo${name ? `, ${name}` : ''}`
     );
+    if (metrics) {
+      lines.push(
+        `- **Tus factores físicos calculados:** TMB (metabolismo basal) de **${metrics.bmr} kcal/día**, Gasto Energético Total (GET) de **${metrics.tdee} kcal/día** e IMC de **${metrics.bmi}** (${metrics.bmiCategory}).`
+      );
+    }
+    lines.push(`- **Estrategia para tu ${meta.label}:** ${meta.strategy}`);
     lines.push(
-      `- **Opción 2 (Alta saciedad):** 150g de pechuga de pollo a la plancha + ensalada verde con 50g de aguacate Hass y aceite de oliva (~420 kcal · 14g carbohidratos · 42g proteína).`
+      `- **Aplicación práctica en ${country.name}:** Desayuno sugerido: ${country.mealBlueprints.desayuno} | Cena ligera: ${country.mealBlueprints.cena}`
+    );
+  } else if (normQ.includes('cena') || normQ.includes('noche')) {
+    lines.push(
+      `Para una **cena ligera y equilibrada en ${country.name}**${name ? `, ${name},` : ''} adaptada a tu ${meta.label.split('(')[0].trim().toLowerCase()}:`
+    );
+    lines.push(`- **Opción local recomendada (${country.name}):** ${country.mealBlueprints.cena}`);
+    lines.push(
+      `- **Alternativa de alta saciedad:** 150g de pechuga de pollo a la plancha + ensalada verde con 50g de aguacate y aceite de oliva (~420 kcal · 14g carbohidratos · 42g proteína).`
     );
   } else if (normQ.includes('desayun') || normQ.includes('manana')) {
     lines.push(
-      `Para el **desayuno**${name ? `, ${name},` : ''} conviene combinar carbohidratos complejos ricos en fibra soluble con proteína de alta calidad para evitar picos de insulina:`
+      `Para el **desayuno en ${country.name}**${name ? `, ${name},` : ''} conviene combinar proteína local y fibra para activar tu metabolismo:`
     );
+    lines.push(`- **Opción local recomendada (${country.name}):** ${country.mealBlueprints.desayuno}`);
     lines.push(
-      `- **Opción 1 (Energía sostenida):** Bowl con 50g de avena en hojuelas, 150g de yogur griego natural, medio banano y semillas de chía (~460 kcal · 62g carbohidratos · 24g proteína · 11g fibra).`
-    );
-    lines.push(
-      `- **Opción 2 (Salado proteico):** 2 huevos enteros + 2 claras revueltas con espinaca, 1 tajada de pan integral de masa madre y 50g de aguacate (~410 kcal · 26g carbohidratos · 25g proteína).`
+      `- **Opción energética:** Bowl con 50g de avena en hojuelas, 150g de yogur griego natural, fruta local y semillas de chía (~460 kcal · 62g carbohidratos · 24g proteína).`
     );
   } else if (normQ.includes('avena') || normQ.includes('arroz') || normQ.includes('pollo') || normQ.includes('100g')) {
     lines.push(
@@ -283,7 +351,7 @@ function buildSmartLocalSynthesis(question, topRefs, userProfile, dailyTracking,
       `- **Arroz cocido (100g):** 130 kcal · **28g carbohidratos** · 2.7g proteína · 0.3g grasa.`
     );
     lines.push(
-      `- **Otras fuentes recomendadas de carbohidratos complejos:** Quinua, batata, papa cocida, lentejas, garbanzos y vegetales fibrosos.`
+      `- **Plus local en ${country.name}:** ${country.foods[0]?.name} (${country.foods[0]?.plus})`
     );
   } else {
     if (topRefs[0]) {
@@ -292,40 +360,84 @@ function buildSmartLocalSynthesis(question, topRefs, userProfile, dailyTracking,
     if (topRefs[1]) {
       lines.push(topRefs[1].snippet);
     }
+    lines.push(`- **Sugerencia para tu proceso en ${country.name}:** ${country.mealBlueprints.almuerzo}`);
   }
 
-  // Integrar el estado real de la cuenta del usuario
+  // Integrar el estado real de la cuenta del usuario + metabolismo
   if (goalKcal > 0) {
     lines.push(
-      `\n**Seguimiento de tu cuenta hoy:** Tu meta configurada es de **${goalKcal} kcal/día** (${goalCarbs}g carbohidratos · ${goalProt}g proteína · ${goalFat}g grasas). Hasta este momento llevas **${consumedKcal} kcal** registradas (${consumedCarbs}g carbohidratos y ${consumedProt}g proteína), por lo que dispones de **${remainingKcal} kcal** y **${remainingProt}g de proteína** para completar tu día.`
+      `\n**Seguimiento de tu proceso hoy (${country.name} · ${meta.label.split('(')[0].trim()}):** Tu meta es **${goalKcal} kcal/día** (${goalCarbs}g carbs · ${goalProt}g proteína · ${goalFat}g grasas). Llevas **${consumedKcal} kcal** (${consumedCarbs}g carbs y ${consumedProt}g proteína), por lo que te restan **${remainingKcal} kcal** y **${remainingProt}g de proteína** para completar tu jornada.`
     );
   } else {
     lines.push(
-      `\n**Sugerencia para tu cuenta:** Recuerda que puedes configurar tu peso, estatura y objetivo en la pestaña **Mi cuenta y metas** para que calculemos tus calorías y gramos exactos de macronutrientes por día.`
+      `\n**Siguiente paso en tu proceso:** Configura tu país, peso, estatura y tipo de metabolismo en **Mi cuenta y metas** para calcular tu TMB, GET y plan diario con alimentos locales.`
     );
   }
 
-  if (hasUserDocs && topRefs[0]) {
+  if (userMemory?.activeProtocols?.length > 0) {
+    const protoLines = userMemory.activeProtocols
+      .map(p => `- **${p.label}** *(${p.source})*: ${p.keyRules}`)
+      .join('\n');
+    lines.push(`\n**Protocolos médicos/clínicos activos en tu perfil:**\n${protoLines}`);
+  }
+
+  if (userMemory?.proactiveInsights?.length > 0) {
     lines.push(
-      `*(Basado en tu documento guardado: ${topRefs[0].documentName}, Pág. ${topRefs[0].pageNumber})*`
+      `\n**Lo que he aprendido de tu historial (Memoria IA — ${userMemory.knowledgeScore}%):** ${userMemory.weightTrendText} ${userMemory.proactiveInsights[0]}`
+    );
+  }
+
+  if (topRefs[0]) {
+    lines.push(
+      `*(Fuente RAG consultada: ${topRefs[0].documentName}, Pág. ${topRefs[0].pageNumber})*`
     );
   }
 
   return lines.join('\n\n');
 }
 
-export async function runHybridRagQuery(question, documents, aiConfig, userProfile, dailyTracking) {
+export async function runHybridRagQuery(
+  question,
+  documents,
+  aiConfig,
+  userProfile,
+  dailyTracking,
+  userMemory = null,
+  tokenBudgetState = null
+) {
   const guardrail = evaluateNutritionGuardrail(question);
   if (!guardrail.allowed) {
     return {
       guardrailTriggered: true,
       answer: guardrail.calmMessage,
-      citations: []
+      citations: [],
+      tokenMetrics: {
+        tokensUsed: 0,
+        tokensSaved: 450,
+        mode: 'guardrail-local-0-tokens'
+      }
+    };
+  }
+
+  // Caché de consultas repetidas en el mismo estado diario (0 tokens)
+  const cacheKey = `${userProfile?.id || 'anon'}|${userProfile?.country || 'CO'}|${dailyTracking?.consumedKcal || 0}|${normalizeText(question).trim()}`;
+  if (QUERY_RESPONSE_CACHE.has(cacheKey)) {
+    const cached = QUERY_RESPONSE_CACHE.get(cacheKey);
+    return {
+      ...cached,
+      tokenMetrics: {
+        tokensUsed: 0,
+        tokensSaved: 700,
+        mode: 'cache-0-tokens'
+      }
     };
   }
 
   const hasUserDocs = Array.isArray(documents) && documents.length > 0;
-  const docsToSearch = hasUserDocs ? documents : INITIAL_DOCUMENTS;
+  const countryRagDoc = buildCountryRagDocument(userProfile?.country || 'CO');
+  const docsToSearch = hasUserDocs
+    ? [...documents, ...GLOBAL_MEDICAL_RAG_DOCUMENTS, countryRagDoc]
+    : [...INITIAL_DOCUMENTS, ...GLOBAL_MEDICAL_RAG_DOCUMENTS, countryRagDoc];
 
   const qVec = computeEmbedding(question);
   const qWords = normalizeText(question)
@@ -371,16 +483,43 @@ export async function runHybridRagQuery(question, documents, aiConfig, userProfi
   const consumedFat = Number(dailyTracking?.consumedFat || 0);
   const waterTodayMl = Number(dailyTracking?.waterTodayMl || 0);
 
-  const profileSummary =
-    goalKcal > 0
-      ? `Datos del usuario en sesión: Nombre: ${userProfile.name}, Peso: ${userProfile.weightKg || 0} kg, Meta diaria: ${goalKcal} kcal (${userProfile.targetCarbs}g carbohidratos, ${userProfile.targetProtein}g proteína, ${userProfile.targetFat}g grasas). Progreso registrado hoy en su cuenta: ${consumedKcal} kcal consumidas (${consumedCarbs}g carbs, ${consumedProtein}g proteína, ${consumedFat}g grasas) y ${waterTodayMl} ml de agua.`
-      : `Datos del usuario en sesión: Nombre: ${userProfile?.name || 'Usuario'}, aún tiene sus metas en 0 kcal (lleva ${consumedKcal} kcal registradas hoy y ${waterTodayMl} ml de agua).`;
+  const country = getCountryProfile(userProfile?.country || 'CO');
+  const budget = getBudgetProfile(userProfile?.budgetTier || 'equilibrado');
+  const meta = getMetabolismProfile(userProfile?.metabolismType || 'equilibrado');
+  const metrics = computeMetabolicMetrics(userProfile);
 
-  if (aiConfig.provider === 'OPENAI' && aiConfig.openAiKey?.trim()) {
+  const metabolicText = metrics
+    ? `TMB: ${metrics.bmr} kcal, GET: ${metrics.tdee} kcal, IMC: ${metrics.bmi} (${metrics.bmiCategory}), Metabolismo: ${meta.label}`
+    : `Metabolismo: ${meta.label}`;
+  const physicalNotesText = userProfile?.physicalNotes ? `, Factores físicos adicionales: ${userProfile.physicalNotes}` : '';
+
+  const memoryBlock = userMemory?.memoryPromptSummary ? `\n\n${userMemory.memoryPromptSummary}` : '';
+  const profileSummary =
+    (goalKcal > 0
+      ? `Datos del usuario en sesión: Nombre: ${userProfile.name}, País: ${country.name} (Productividad local: ${country.productivityFocus}; Plus nutricional: ${country.nutritionalPlus}), Presupuesto/posibilidades: ${budget.label}, Peso: ${userProfile.weightKg || 0} kg, ${metabolicText}${physicalNotesText}. Meta diaria: ${goalKcal} kcal (${userProfile.targetCarbs}g carbohidratos, ${userProfile.targetProtein}g proteína, ${userProfile.targetFat}g grasas). Progreso registrado hoy: ${consumedKcal} kcal consumidas (${consumedCarbs}g carbs, ${consumedProtein}g proteína, ${consumedFat}g grasas) y ${waterTodayMl} ml de agua.`
+      : `Datos del usuario en sesión: Nombre: ${userProfile?.name || 'Usuario'}, País: ${country.name} (Plus: ${country.nutritionalPlus}), Presupuesto: ${budget.label}, ${metabolicText}${physicalNotesText}. Aún tiene sus metas en 0 kcal (lleva ${consumedKcal} kcal registradas hoy y ${waterTodayMl} ml de agua).`) +
+    memoryBlock;
+
+  // Compresión estricta de contexto (máx. 900 tokens de entrada) para que la IA no se sature a largo plazo
+  const compactProfileSummary = trimToTokenBudget(profileSummary, 420);
+  const compactContextText = trimToTokenBudget(
+    topRefs
+      .map(
+        (c, idx) =>
+          `[Ref ${idx + 1}: ${c.documentName}, Pág. ${c.pageNumber}]: ${trimToTokenBudget(c.snippet, 180)}`
+      )
+      .join('\n'),
+    420
+  );
+
+  const usedToday = Number(tokenBudgetState?.tokensUsedToday || 0);
+  const withinDailyBudget = usedToday < TOKEN_GOVERNANCE.DAILY_TOKEN_BUDGET;
+  // Ahorro estimado frente a enviar historial crudo + documentos completos sin compresión (~2400 tokens)
+  const rawUncompressedEstimate = 2400;
+
+  if (withinDailyBudget && aiConfig.provider === 'OPENAI' && aiConfig.openAiKey?.trim()) {
     try {
-      const contextText = topRefs
-        .map((c, idx) => `[Referencia ${idx + 1}: ${c.documentName}, Pág. ${c.pageNumber} — ${c.sectionTitle}]: ${c.snippet}`)
-        .join('\n\n');
+      const userPrompt = `${compactProfileSummary}\n\nReferencias RAG:\n${compactContextText}\n\nConsulta: ${question}`;
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -389,15 +528,16 @@ export async function runHybridRagQuery(question, documents, aiConfig, userProfi
         },
         body: JSON.stringify({
           model: 'gpt-4o-mini',
+          max_tokens: TOKEN_GOVERNANCE.MAX_OUTPUT_TOKENS,
           messages: [
             {
               role: 'system',
               content:
-                'Eres un nutricionista clínico profesional, cercano y claro. Responde en español dando consejos prácticos de calorías, porciones y macronutrientes personalizados al seguimiento del usuario.'
+                'Eres un nutricionista clínico profesional, cercano y conciso. Responde en español en viñetas cortas con calorías, gramos y guía práctica personalizada.'
             },
             {
               role: 'user',
-              content: `${profileSummary}\n\nReferencias nutricionales:\n${contextText}\n\nConsulta del usuario: ${question}`
+              content: userPrompt
             }
           ],
           temperature: 0.3
@@ -405,22 +545,39 @@ export async function runHybridRagQuery(question, documents, aiConfig, userProfi
       });
       if (res.ok) {
         const data = await res.json();
-        return {
+        const answer = data.choices[0].message.content;
+        const tokensUsed =
+          data.usage?.total_tokens || estimateTokens(userPrompt) + estimateTokens(answer);
+        const resultObj = {
           guardrailTriggered: false,
-          answer: data.choices[0].message.content,
-          citations: userCitations
+          answer,
+          citations: userCitations,
+          tokenMetrics: {
+            tokensUsed,
+            tokensSaved: Math.max(0, rawUncompressedEstimate - tokensUsed),
+            mode: 'openai-comprimido'
+          }
         };
+        QUERY_RESPONSE_CACHE.set(cacheKey, resultObj);
+        return resultObj;
       }
     } catch {
       // Continúa al respaldo
     }
   }
 
-  if (aiConfig.provider === 'GEMINI' && aiConfig.geminiKey?.trim()) {
+  if (withinDailyBudget && aiConfig.provider === 'GEMINI' && aiConfig.geminiKey?.trim()) {
     try {
-      const contextText = topRefs
-        .map((c, idx) => `[Referencia ${idx + 1}: ${c.documentName}, Pág. ${c.pageNumber} — ${c.sectionTitle}]: ${c.snippet}`)
-        .join('\n\n');
+      const promptText = `Actúa como nutricionista clínico en NutriStudio (sé claro y conciso).
+${compactProfileSummary}
+
+Referencias RAG:
+${compactContextText}
+
+Instrucciones: Si no es tema de nutrición, redirige con calma. Si lo es, responde en español en viñetas cortas con gramos, calorías y guía para el proceso de hoy.
+
+Consulta: ${question}`;
+
       const modelsToTry = ['gemini-flash-lite-latest', 'gemini-2.5-flash-lite', 'gemini-flash-latest'];
       for (const modelName of modelsToTry) {
         const res = await fetch(
@@ -429,23 +586,13 @@ export async function runHybridRagQuery(question, documents, aiConfig, userProfi
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              generationConfig: {
+                maxOutputTokens: TOKEN_GOVERNANCE.MAX_OUTPUT_TOKENS,
+                temperature: 0.3
+              },
               contents: [
                 {
-                  parts: [
-                    {
-                      text: `Actúa como un nutricionista clínico profesional y cercano en la plataforma NutriStudio.
-${profileSummary}
-
-Referencias técnicas de apoyo:
-${contextText}
-
-Instrucciones:
-- Si la pregunta NO tiene ninguna relación con alimentación, nutrición, calorías, salud o comidas, responde con tranquilidad y amabilidad invitando al usuario a consultar sobre nutrición.
-- Si es una consulta nutricional, responde en español de forma clara, profesional y estructurada con viñetas cortas, dando cantidades en gramos y calorías aproximadas y teniendo en cuenta el progreso del usuario hoy.
-
-Consulta del usuario: ${question}`
-                    }
-                  ]
+                  parts: [{ text: promptText }]
                 }
               ]
             })
@@ -455,11 +602,22 @@ Consulta del usuario: ${question}`
           const data = await res.json();
           const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
           if (text) {
-            return {
+            const answer = text.trim();
+            const tokensUsed =
+              data?.usageMetadata?.totalTokenCount ||
+              estimateTokens(promptText) + estimateTokens(answer);
+            const resultObj = {
               guardrailTriggered: false,
-              answer: text.trim(),
-              citations: userCitations
+              answer,
+              citations: userCitations,
+              tokenMetrics: {
+                tokensUsed,
+                tokensSaved: Math.max(0, rawUncompressedEstimate - tokensUsed),
+                mode: 'gemini-comprimido'
+              }
             };
+            QUERY_RESPONSE_CACHE.set(cacheKey, resultObj);
+            return resultObj;
           }
         }
       }
@@ -468,11 +626,28 @@ Consulta del usuario: ${question}`
     }
   }
 
-  return {
+  const localAnswer = buildSmartLocalSynthesis(
+    question,
+    topRefs,
+    userProfile,
+    dailyTracking,
+    hasUserDocs,
+    userMemory
+  );
+  const localResult = {
     guardrailTriggered: false,
-    answer: buildSmartLocalSynthesis(question, topRefs, userProfile, dailyTracking, hasUserDocs),
-    citations: userCitations
+    answer: withinDailyBudget
+      ? localAnswer
+      : `${localAnswer}\n\n*(Modo Ahorro de Tokens activo: se alcanzó el límite diario de ${TOKEN_GOVERNANCE.DAILY_TOKEN_BUDGET.toLocaleString()} tokens LLM, por lo que sigo guiándote sin interrupción con el motor RAG local de 0 tokens).*`,
+    citations: userCitations,
+    tokenMetrics: {
+      tokensUsed: 0,
+      tokensSaved: 950,
+      mode: withinDailyBudget ? 'rag-local-0-tokens' : 'modo-ahorro-limite-diario'
+    }
   };
+  QUERY_RESPONSE_CACHE.set(cacheKey, localResult);
+  return localResult;
 }
 
 export const MEAL_PRESETS = [

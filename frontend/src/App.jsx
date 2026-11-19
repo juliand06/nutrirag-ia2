@@ -1,5 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { runHybridRagQuery, MEAL_PRESETS } from './services/nutriRagEngine';
+import { runHybridRagQuery, MEAL_PRESETS, TOKEN_GOVERNANCE } from './services/nutriRagEngine';
+import {
+  COUNTRY_OPTIONS,
+  BUDGET_OPTIONS,
+  METABOLISM_OPTIONS,
+  SEX_OPTIONS,
+  buildProcessCoachPlan,
+  computeMetabolicMetrics,
+  getCountryProfile
+} from './services/countryNutritionData';
+import {
+  MEDICAL_CONDITIONS,
+  buildUserMemoryProfile,
+  getActiveMedicalProtocols
+} from './services/clinicalKnowledgeBase';
 import {
   GOAL_OPTIONS,
   getTodayIso,
@@ -146,6 +160,12 @@ export default function App() {
   const [profWeight, setProfWeight] = useState('0');
   const [profHeight, setProfHeight] = useState('0');
   const [profAge, setProfAge] = useState('0');
+  const [profSex, setProfSex] = useState('no_especificado');
+  const [profMetabolism, setProfMetabolism] = useState('equilibrado');
+  const [profCountry, setProfCountry] = useState('CO');
+  const [profBudget, setProfBudget] = useState('equilibrado');
+  const [profMedicalConditions, setProfMedicalConditions] = useState([]);
+  const [profPhysicalNotes, setProfPhysicalNotes] = useState('');
   const [profActivity, setProfActivity] = useState('moderado');
   const [profCalories, setProfCalories] = useState('0');
   const [profCarbs, setProfCarbs] = useState('0');
@@ -158,6 +178,12 @@ export default function App() {
   const [newWeightInput, setNewWeightInput] = useState('');
   const [newWeightNote, setNewWeightNote] = useState('');
 
+  // Copiloto IA Omnipresente (contextual en toda la plataforma)
+  const [copilotOpen, setCopilotOpen] = useState(false);
+  const [copilotInput, setCopilotInput] = useState('');
+  const [copilotReply, setCopilotReply] = useState(null);
+  const [isCopilotLoading, setIsCopilotLoading] = useState(false);
+
   useEffect(() => {
     if (currentUser) {
       const ws = getUserWorkspace(currentUser);
@@ -167,6 +193,12 @@ export default function App() {
       setProfWeight(String(currentUser.weightKg ?? 0));
       setProfHeight(String(currentUser.heightCm ?? 0));
       setProfAge(String(currentUser.age ?? 0));
+      setProfSex(currentUser.sex || 'no_especificado');
+      setProfMetabolism(currentUser.metabolismType || 'equilibrado');
+      setProfCountry(currentUser.country || 'CO');
+      setProfBudget(currentUser.budgetTier || 'equilibrado');
+      setProfMedicalConditions(Array.isArray(currentUser.medicalConditions) ? currentUser.medicalConditions : []);
+      setProfPhysicalNotes(currentUser.physicalNotes || '');
       setProfActivity(currentUser.activityLevel || 'moderado');
       setProfCalories(String(currentUser.dailyCalories ?? 0));
       setProfCarbs(String(currentUser.targetCarbs ?? 0));
@@ -354,13 +386,29 @@ export default function App() {
       mealsTodayCount: mealsToday.length
     };
 
+    const currentMemory = buildUserMemoryProfile({
+      userProfile: currentUser,
+      workspace,
+      dailyTracking
+    });
+
+    const todayTokenStats = workspace?.tokenUsageByDate?.[todayIso] || {
+      used: 0,
+      saved: 0,
+      queries: 0
+    };
+
+    const t0 = performance.now();
     const result = await runHybridRagQuery(
       q,
       workspace?.documents || [],
       aiConfig,
       currentUser,
-      dailyTracking
+      dailyTracking,
+      currentMemory,
+      { tokensUsedToday: todayTokenStats.used }
     );
+    const latencyMs = Math.max(1, Math.round(performance.now() - t0));
 
     const botMsg = {
       id: 'bot-' + Date.now(),
@@ -368,17 +416,45 @@ export default function App() {
       createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       guardrailTriggered: result.guardrailTriggered,
       text: result.answer,
-      citations: result.citations || []
+      citations: result.citations || [],
+      tokenMetrics: result.tokenMetrics || null
     };
 
-    updateWorkspace(prev => ({
-      ...prev,
-      conversations: prev.conversations.map(c =>
-        c.id === targetConvId
-          ? { ...c, updatedAt: todayIso, messages: [...c.messages, botMsg] }
-          : c
-      )
-    }));
+    const deltaUsed = Number(result.tokenMetrics?.tokensUsed || 0);
+    const deltaSaved = Number(result.tokenMetrics?.tokensSaved || 0);
+    const routingMode = result.tokenMetrics?.mode || 'rag-local-0-tokens';
+
+    updateWorkspace(prev => {
+      const prevDay = prev.tokenUsageByDate?.[todayIso] || { used: 0, saved: 0, queries: 0 };
+      const prevTelemetry = Array.isArray(prev.aiTelemetry) ? prev.aiTelemetry : [];
+      const newEvent = {
+        id: 'tel-' + Date.now(),
+        date: todayIso,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        screen: activeSection,
+        mode: routingMode,
+        tokensUsed: deltaUsed,
+        tokensSaved: deltaSaved,
+        latencyMs
+      };
+      return {
+        ...prev,
+        aiTelemetry: [newEvent, ...prevTelemetry].slice(0, 60),
+        tokenUsageByDate: {
+          ...(prev.tokenUsageByDate || {}),
+          [todayIso]: {
+            used: prevDay.used + deltaUsed,
+            saved: prevDay.saved + deltaSaved,
+            queries: prevDay.queries + 1
+          }
+        },
+        conversations: prev.conversations.map(c =>
+          c.id === targetConvId
+            ? { ...c, updatedAt: todayIso, messages: [...c.messages, botMsg] }
+            : c
+        )
+      };
+    });
     setIsSendingChat(false);
   };
 
@@ -677,6 +753,80 @@ export default function App() {
     }));
   };
 
+  const handleCopilotAsk = async (forcedText) => {
+    const q = (forcedText !== undefined ? forcedText : copilotInput).trim();
+    if (!q || isCopilotLoading || !currentUser || !workspace) return;
+    if (forcedText === undefined) setCopilotInput('');
+    setIsCopilotLoading(true);
+
+    const dailyTracking = {
+      consumedKcal,
+      consumedCarbs,
+      consumedProtein,
+      consumedFat,
+      waterTodayMl,
+      mealsCount: mealsToday.length
+    };
+    const currentMemory = buildUserMemoryProfile({
+      userProfile: currentUser,
+      workspace,
+      dailyTracking
+    });
+    const todayStats = workspace?.tokenUsageByDate?.[todayIso] || { used: 0, saved: 0, queries: 0 };
+
+    const t0 = performance.now();
+    const res = await runHybridRagQuery(
+      q,
+      workspace?.documents || [],
+      aiConfig,
+      currentUser,
+      dailyTracking,
+      currentMemory,
+      { tokensUsedToday: todayStats.used }
+    );
+    const latencyMs = Math.max(1, Math.round(performance.now() - t0));
+    const deltaUsed = Number(res.tokenMetrics?.tokensUsed || 0);
+    const deltaSaved = Number(res.tokenMetrics?.tokensSaved || 0);
+
+    setCopilotReply({
+      question: q,
+      answer: res.answer,
+      mode: res.tokenMetrics?.mode || 'rag-local-0-tokens',
+      tokensUsed: deltaUsed,
+      latencyMs
+    });
+
+    updateWorkspace(prev => {
+      const prevDay = prev.tokenUsageByDate?.[todayIso] || { used: 0, saved: 0, queries: 0 };
+      const prevTel = Array.isArray(prev.aiTelemetry) ? prev.aiTelemetry : [];
+      return {
+        ...prev,
+        aiTelemetry: [
+          {
+            id: 'tel-cop-' + Date.now(),
+            date: todayIso,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            screen: `copilot:${activeSection}`,
+            mode: res.tokenMetrics?.mode || 'rag-local-0-tokens',
+            tokensUsed: deltaUsed,
+            tokensSaved: deltaSaved,
+            latencyMs
+          },
+          ...prevTel
+        ].slice(0, 60),
+        tokenUsageByDate: {
+          ...(prev.tokenUsageByDate || {}),
+          [todayIso]: {
+            used: prevDay.used + deltaUsed,
+            saved: prevDay.saved + deltaSaved,
+            queries: prevDay.queries + 1
+          }
+        }
+      };
+    });
+    setIsCopilotLoading(false);
+  };
+
   // ============================================================================
   // MANEJADOR DE PERFIL Y CÁLCULO DE METAS
   // ============================================================================
@@ -685,6 +835,8 @@ export default function App() {
       weightKg: profWeight,
       heightCm: profHeight,
       age: profAge,
+      sex: profSex,
+      metabolismType: profMetabolism,
       activityLevel: profActivity,
       goal: profGoal
     });
@@ -694,12 +846,20 @@ export default function App() {
       setProfProtein(String(rec.targetProtein));
       setProfFat(String(rec.targetFat));
       setProfWaterGoal(String(rec.waterGoalMl));
-      setProfileSavedNotice('Cálculo generado. Haz clic en "Guardar mis metas" para aplicarlo.');
-      setTimeout(() => setProfileSavedNotice(''), 4000);
+      setProfileSavedNotice(
+        `Cálculo generado (TMB ${rec.bmr} kcal · GET ${rec.tdee} kcal). Haz clic en "Guardar mis metas" para aplicarlo.`
+      );
+      setTimeout(() => setProfileSavedNotice(''), 5000);
     } else {
       setProfileSavedNotice('Ingresa tu peso, estatura y edad mayores a 0 para calcular automáticamente.');
       setTimeout(() => setProfileSavedNotice(''), 4000);
     }
+  };
+
+  const toggleMedicalCondition = (condId) => {
+    setProfMedicalConditions(prev =>
+      prev.includes(condId) ? prev.filter(id => id !== condId) : [...prev, condId]
+    );
   };
 
   const handleSaveProfile = (e) => {
@@ -711,6 +871,12 @@ export default function App() {
       weightKg: w,
       heightCm: Math.max(0, Number(profHeight) || 0),
       age: Math.max(0, Number(profAge) || 0),
+      sex: profSex,
+      metabolismType: profMetabolism,
+      country: profCountry,
+      budgetTier: profBudget,
+      medicalConditions: profMedicalConditions,
+      physicalNotes: profPhysicalNotes.trim(),
       activityLevel: profActivity,
       dailyCalories: Math.max(0, Number(profCalories) || 0),
       targetCarbs: Math.max(0, Number(profCarbs) || 0),
@@ -907,6 +1073,51 @@ export default function App() {
     ? GOAL_OPTIONS.find(g => g.id === currentUser.goal)?.label
     : 'Sin objetivo configurado aún';
 
+  const processCoach = buildProcessCoachPlan({
+    userProfile: currentUser,
+    dailyTracking: {
+      consumedKcal,
+      consumedCarbs,
+      consumedProtein,
+      consumedFat,
+      waterTodayMl,
+      mealsCount: mealsToday.length
+    }
+  });
+
+  const liveProfileMetrics = computeMetabolicMetrics({
+    weightKg: profWeight,
+    heightCm: profHeight,
+    age: profAge,
+    sex: profSex,
+    metabolismType: profMetabolism,
+    activityLevel: profActivity
+  });
+  const liveSelectedCountry = getCountryProfile(profCountry);
+  const liveActiveProtocols = getActiveMedicalProtocols(profMedicalConditions);
+  const todayTokenStats = workspace.tokenUsageByDate?.[todayIso] || {
+    used: 0,
+    saved: 0,
+    queries: 0
+  };
+  const pctTokenBudget = Math.min(
+    100,
+    Math.round((todayTokenStats.used / TOKEN_GOVERNANCE.DAILY_TOKEN_BUDGET) * 100)
+  );
+
+  const userMemory = buildUserMemoryProfile({
+    userProfile: currentUser,
+    workspace,
+    dailyTracking: {
+      consumedKcal,
+      consumedCarbs,
+      consumedProtein,
+      consumedFat,
+      waterTodayMl,
+      mealsCount: mealsToday.length
+    }
+  });
+
   return (
     <div className="workspace-layout">
       {/* BARRA LATERAL MINIMALISTA */}
@@ -944,6 +1155,13 @@ export default function App() {
             >
               <span>Mis documentos</span>
               <span className="sidebar-count">{workspace.documents?.length || 0}</span>
+            </button>
+            <button
+              className={`sidebar-link ${activeSection === 'analytics' ? 'active' : ''}`}
+              onClick={() => setActiveSection('analytics')}
+            >
+              <span>Rendimiento e IA</span>
+              <span className="sidebar-count">{userMemory.knowledgeScore}%</span>
             </button>
             <button
               className={`sidebar-link ${activeSection === 'profile' ? 'active' : ''}`}
@@ -1127,6 +1345,223 @@ export default function App() {
                   <div className="progress-fill" style={{ width: `${pctFat}%` }} />
                 </div>
                 <div className="stat-sub">{pctFat}% completado</div>
+              </div>
+            </div>
+
+            {/* ACOMPAÑAMIENTO ACTIVO DE LA IA EN EL PROCESO (PAÍS + METABOLISMO + POSIBILIDADES) */}
+            <div className="card" style={{ marginBottom: '20px' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'flex-start',
+                  gap: '12px',
+                  flexWrap: 'wrap',
+                  marginBottom: '12px'
+                }}
+              >
+                <div>
+                  <span className="tag-pill">
+                    Acompañamiento IA en tu Proceso · {processCoach.stageBadge}
+                  </span>
+                  <div className="card-title" style={{ marginTop: '8px' }}>
+                    {processCoach.nextActionTitle}
+                  </div>
+                  <div className="card-desc" style={{ marginBottom: 0 }}>
+                    {processCoach.nextActionDetail}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn-solid"
+                    onClick={() => {
+                      setActiveSection('chat');
+                      handleSendQuestion(
+                        `Guíame en mi proceso de hoy en ${processCoach.country.name} con presupuesto ${processCoach.budget.id} y ${processCoach.meta.label}. Llevo ${consumedKcal} kcal y ${consumedProtein}g de proteína; ¿qué plan paso a paso me recomiendas para el resto del día?`
+                      );
+                    }}
+                  >
+                    Guiarme en mi proceso hoy
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-outline"
+                    onClick={() => {
+                      setActiveSection('chat');
+                      handleSendQuestion(
+                        `¿Qué alimentos de la productividad alimenticia de ${processCoach.country.name} me dan el mejor plus nutricional para mi presupuesto ${processCoach.budget.id} y mi metabolismo?`
+                      );
+                    }}
+                  >
+                    Plus alimenticios de {processCoach.country.name}
+                  </button>
+                </div>
+              </div>
+
+              <div className="split-grid" style={{ marginTop: '14px' }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '0.84rem', marginBottom: '8px' }}>
+                    Productividad alimenticia de {processCoach.country.name} (acorde a tus posibilidades: {processCoach.budget.id})
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '10px' }}>
+                    {processCoach.country.nutritionalPlus}
+                  </div>
+                  <div className="list-stack">
+                    {processCoach.prioritizedFoods.map(food => (
+                      <div key={food.name} className="list-item-card">
+                        <div>
+                          <div style={{ fontWeight: 500, fontSize: '0.84rem' }}>{food.name}</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                            {food.plus}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right', flexShrink: 0, fontSize: '0.76rem' }}>
+                          <strong>{food.kcal100g} kcal</strong>
+                          <div style={{ color: 'var(--text-muted)' }}>
+                            P: {food.protein100g}g · C: {food.carbs100g}g
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '0.84rem', marginBottom: '8px' }}>
+                    Factores físicos, metabolismo y avance del proceso
+                  </div>
+                  <div className="list-item-card" style={{ marginBottom: '10px' }}>
+                    <div>
+                      <div style={{ fontWeight: 500, fontSize: '0.83rem' }}>
+                        {processCoach.meta.label}
+                      </div>
+                      <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '3px' }}>
+                        {processCoach.meta.strategy}
+                      </div>
+                      {processCoach.metrics && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--accent)', marginTop: '6px', fontWeight: 500 }}>
+                          TMB: {processCoach.metrics.bmr} kcal · GET: {processCoach.metrics.tdee} kcal · IMC: {processCoach.metrics.bmi} ({processCoach.metrics.bmiCategory})
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="list-stack">
+                    {processCoach.checklist.map(step => (
+                      <div key={step.label} className="list-item-card" style={{ padding: '8px 12px' }}>
+                        <span style={{ fontSize: '0.8rem' }}>
+                          {step.done ? '✓ ' : '○ '}
+                          {step.label}
+                        </span>
+                        <span className="tag-pill">{step.done ? 'Listo' : 'Pendiente'}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* MEMORIA DEL AGENTE IA + BASE NUTRICIONAL Y MÉDICA GLOBAL */}
+            <div className="card" style={{ marginBottom: '20px' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'flex-start',
+                  gap: '12px',
+                  flexWrap: 'wrap',
+                  marginBottom: '12px'
+                }}
+              >
+                <div>
+                  <span className="tag-pill">
+                    Memoria IA del Usuario · Conocimiento acumulado: {userMemory.knowledgeScore}%
+                  </span>
+                  <div className="card-title" style={{ marginTop: '8px' }}>
+                    Lo que tu Agente IA ya conoce de ti y Base Clínica Global (OMS · ADA · AHA/DASH · ISSN)
+                  </div>
+                  <div className="card-desc" style={{ marginBottom: 0 }}>
+                    El asistente recuerda tu evolución de peso, promedio real de comidas, país, metabolismo y protocolos médicos para adelantarse y guiarte mejor cada día.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn-outline"
+                  onClick={() => {
+                    setActiveSection('chat');
+                    handleSendQuestion(
+                      'Analiza todo lo que conoces de mi historial (peso, comidas recientes, país, metabolismo y condiciones médicas) y dame una guía personalizada con los ajustes clave que debo hacer hoy.'
+                    );
+                  }}
+                >
+                  Evaluar mi historial y guiarme hoy
+                </button>
+              </div>
+
+              <div className="progress-track" style={{ marginBottom: '14px' }}>
+                <div className="progress-fill" style={{ width: `${userMemory.knowledgeScore}%` }} />
+              </div>
+
+              <div className="split-grid">
+                <div className="list-stack">
+                  <div className="list-item-card" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                    <strong style={{ fontSize: '0.82rem' }}>Evolución y patrones detectados</strong>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                      {userMemory.weightTrendText}
+                    </span>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                      {userMemory.statsCount.meals > 0
+                        ? `Promedio por plato registrado: ${userMemory.avgMealKcal} kcal · ${userMemory.avgMealProtein}g proteína · ${userMemory.avgMealCarbs}g carbs.`
+                        : 'Registra tus comidas para que el bot aprenda tus hábitos y platos frecuentes.'}
+                    </span>
+                  </div>
+                  <div className="list-item-card" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                    <strong style={{ fontSize: '0.82rem' }}>Alertas y recomendaciones proactivas</strong>
+                    {userMemory.proactiveInsights.map((insight, idx) => (
+                      <span key={idx} style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                        • {insight}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="list-stack">
+                  <div className="list-item-card" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                    <strong style={{ fontSize: '0.82rem' }}>
+                      Protocolos médicos activos ({userMemory.activeProtocols.length})
+                    </strong>
+                    {userMemory.activeProtocols.length === 0 ? (
+                      <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                        Base nutricional global activa (OMS/FAO/ISSN). Puedes activar condiciones médicas específicas (insulina, hipertensión, colesterol, digestión, anemia) en <strong>Mi cuenta y metas</strong>.
+                      </span>
+                    ) : (
+                      userMemory.activeProtocols.map(proto => (
+                        <div key={proto.id} style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                          <strong style={{ color: 'var(--text-primary)' }}>{proto.label}</strong>{' '}
+                          <span style={{ color: 'var(--accent)' }}>({proto.source})</span>: {proto.keyRules}
+                        </div>
+                      ))
+                    )}
+                    <span style={{ fontSize: '0.71rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      Nota: Orientación nutricional educativa basada en guías clínicas globales; no sustituye valoración médica profesional.
+                    </span>
+                  </div>
+
+                  <div className="list-item-card" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', fontSize: '0.82rem' }}>
+                      <strong>Control y ahorro de tokens (Uso diario continuo)</strong>
+                      <span>
+                        {todayTokenStats.used.toLocaleString()} / {TOKEN_GOVERNANCE.DAILY_TOKEN_BUDGET.toLocaleString()} tokens
+                      </span>
+                    </div>
+                    <div className="progress-track" style={{ width: '100%' }}>
+                      <div className="progress-fill" style={{ width: `${pctTokenBudget}%` }} />
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                      Compresión activa (máx. {TOKEN_GOVERNANCE.MAX_CONTEXT_TOKENS} tokens entrada / {TOKEN_GOVERNANCE.MAX_OUTPUT_TOKENS} salida), caché de 0 tokens y guardrail local. Ahorro estimado hoy: <strong>{todayTokenStats.saved.toLocaleString()} tokens</strong>.
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1886,6 +2321,165 @@ export default function App() {
         )}
 
         {/* ====================================================================
+            SECCIÓN 4.5: RENDIMIENTO CORPORAL, TELEMETRÍA IA Y BASE RELACIONAL
+           ==================================================================== */}
+        {activeSection === 'analytics' && (() => {
+          const telemetryList = Array.isArray(workspace.aiTelemetry) ? workspace.aiTelemetry : [];
+          const avgLatency =
+            telemetryList.length > 0
+              ? Math.round(
+                  telemetryList.reduce((acc, ev) => acc + (Number(ev.latencyMs) || 0), 0) /
+                    telemetryList.length
+                )
+              : 0;
+          const totalSavedAll = telemetryList.reduce(
+            (acc, ev) => acc + (Number(ev.tokensSaved) || 0),
+            0
+          );
+          const zeroTokenCount = telemetryList.filter(ev => Number(ev.tokensUsed || 0) === 0).length;
+          const zeroTokenPct =
+            telemetryList.length > 0 ? Math.round((zeroTokenCount / telemetryList.length) * 100) : 100;
+
+          const bodyAdherence = Math.round(
+            (pctKcal * 0.4 +
+              pctProtein * 0.35 +
+              (goalWater > 0 ? Math.min(100, Math.round((waterTodayMl / goalWater) * 100)) : 0) *
+                0.25)
+          );
+
+          return (
+            <div>
+              <div className="page-header">
+                <div>
+                  <h1 className="page-title">Rendimiento Corporal, IA y Base Relacional</h1>
+                  <p className="page-subtitle">
+                    Monitoreo en vivo de tu proceso físico, gasto y rendimiento de la IA, y conexión entre tu historial relacional y las bases globales/país.
+                  </p>
+                </div>
+              </div>
+
+              <div className="stats-row">
+                <div className="stat-box">
+                  <div className="stat-label">Adherencia de tu proceso hoy</div>
+                  <div className="stat-value">{bodyAdherence}%</div>
+                  <div className="progress-track">
+                    <div className="progress-fill" style={{ width: `${bodyAdherence}%` }} />
+                  </div>
+                  <div className="stat-sub">Calorías · Proteína · Hidratación</div>
+                </div>
+
+                <div className="stat-box">
+                  <div className="stat-label">Conocimiento del Bot sobre ti</div>
+                  <div className="stat-value">{userMemory.knowledgeScore}%</div>
+                  <div className="progress-track">
+                    <div className="progress-fill" style={{ width: `${userMemory.knowledgeScore}%` }} />
+                  </div>
+                  <div className="stat-sub">Memoria clínica + hábitos + país</div>
+                </div>
+
+                <div className="stat-box">
+                  <div className="stat-label">Gasto de tokens hoy</div>
+                  <div className="stat-value">
+                    {todayTokenStats.used.toLocaleString()}{' '}
+                    <span style={{ fontSize: '0.8rem', fontWeight: 400, color: 'var(--text-muted)' }}>
+                      / {TOKEN_GOVERNANCE.DAILY_TOKEN_BUDGET.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="progress-track">
+                    <div className="progress-fill" style={{ width: `${pctTokenBudget}%` }} />
+                  </div>
+                  <div className="stat-sub">Ahorro acumulado: {Math.max(todayTokenStats.saved, totalSavedAll).toLocaleString()} tokens</div>
+                </div>
+
+                <div className="stat-box">
+                  <div className="stat-label">Eficiencia y latencia IA</div>
+                  <div className="stat-value">{avgLatency > 0 ? `${avgLatency} ms` : '<15 ms'}</div>
+                  <div className="stat-sub" style={{ marginTop: '8px' }}>
+                    {zeroTokenPct}% resuelto a 0 tokens (caché / local / guardrail)
+                  </div>
+                </div>
+              </div>
+
+              <div className="split-grid" style={{ marginTop: '18px' }}>
+                <div className="card">
+                  <div className="card-title">Arquitectura de Base de Datos Relacional</div>
+                  <div className="card-desc">
+                    Conexión en tiempo real entre tu base interna de usuario y las bases externas globales y de país (`docker/init-db.sql`).
+                  </div>
+                  <div className="list-stack">
+                    <div className="list-item-card">
+                      <div>
+                        <strong>Base Interna · Perfil Biométrico</strong>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                          `users_biometric_profiles` · {processCoach.metrics ? `TMB ${processCoach.metrics.bmr} · GET ${processCoach.metrics.tdee} · IMC ${processCoach.metrics.bmi}` : 'Pendiente de medidas'}
+                        </div>
+                      </div>
+                      <span className="tag-pill">Activo</span>
+                    </div>
+                    <div className="list-item-card">
+                      <div>
+                        <strong>Base Interna · Comidas y Progreso Corporal</strong>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                          `daily_meal_logs` ({workspace.mealLogs?.length || 0}) · `body_progress_logs` ({workspace.weightHistory?.length || 0})
+                        </div>
+                      </div>
+                      <span className="tag-pill">Relacional</span>
+                    </div>
+                    <div className="list-item-card">
+                      <div>
+                        <strong>Base Externa · Productividad por País</strong>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                          `country_food_productivity` → {processCoach.country.name} ({processCoach.country.foods.length} alimentos locales indexados)
+                        </div>
+                      </div>
+                      <span className="tag-pill">{processCoach.country.id}</span>
+                    </div>
+                    <div className="list-item-card">
+                      <div>
+                        <strong>Base Externa · Rúbricas Médicas Globales</strong>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                          `clinical_nutrition_rubrics` (OMS · FAO · ADA · AHA/DASH · ISSN) · {userMemory.activeProtocols.length} activas en tu perfil
+                        </div>
+                      </div>
+                      <span className="tag-pill">RAG Híbrido</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="card">
+                  <div className="card-title">Telemetría reciente de la IA ({telemetryList.length})</div>
+                  <div className="card-desc">
+                    Registro de cada interacción: pantalla, modo de enrutamiento, latencia y tokens consumidos/ahorrados.
+                  </div>
+                  {telemetryList.length === 0 ? (
+                    <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', padding: '14px 0' }}>
+                      Aún no hay eventos registrados hoy. Usa el Copiloto IA flotante o haz una consulta para ver la telemetría en vivo.
+                    </p>
+                  ) : (
+                    <div className="list-stack">
+                      {telemetryList.slice(0, 6).map(ev => (
+                        <div key={ev.id} className="list-item-card">
+                          <div>
+                            <strong style={{ fontSize: '0.82rem' }}>{ev.mode}</strong>
+                            <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                              Pantalla: {ev.screen} · {ev.time} · {ev.latencyMs} ms
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right', fontSize: '0.75rem' }}>
+                            <strong>{ev.tokensUsed} tok</strong>
+                            <div style={{ color: 'var(--accent)' }}>-{ev.tokensSaved} ahorrados</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ====================================================================
             SECCIÓN 5: MI CUENTA Y METAS (CONFIGURACIÓN DESDE 0 + CALCULADORA)
            ==================================================================== */}
         {activeSection === 'profile' && (
@@ -1963,6 +2557,110 @@ export default function App() {
                         <option value="intenso">Intenso (6-7 días/semana)</option>
                       </select>
                     </div>
+                  </div>
+
+                  <div className="field-row">
+                    <div className="field-group">
+                      <label className="field-label">País (productividad alimenticia local)</label>
+                      <select
+                        className="input-clean"
+                        value={profCountry}
+                        onChange={e => setProfCountry(e.target.value)}
+                      >
+                        {COUNTRY_OPTIONS.map(c => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="field-group">
+                      <label className="field-label">Posibilidades / presupuesto alimenticio</label>
+                      <select
+                        className="input-clean"
+                        value={profBudget}
+                        onChange={e => setProfBudget(e.target.value)}
+                      >
+                        {BUDGET_OPTIONS.map(b => (
+                          <option key={b.id} value={b.id}>
+                            {b.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="field-row">
+                    <div className="field-group">
+                      <label className="field-label">Sexo biológico (para cálculo TMB)</label>
+                      <select
+                        className="input-clean"
+                        value={profSex}
+                        onChange={e => setProfSex(e.target.value)}
+                      >
+                        {SEX_OPTIONS.map(s => (
+                          <option key={s.id} value={s.id}>
+                            {s.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="field-group">
+                      <label className="field-label">Tipo de metabolismo</label>
+                      <select
+                        className="input-clean"
+                        value={profMetabolism}
+                        onChange={e => setProfMetabolism(e.target.value)}
+                      >
+                        {METABOLISM_OPTIONS.map(m => (
+                          <option key={m.id} value={m.id}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="field-group">
+                    <label className="field-label">
+                      Condiciones médicas o enfoques clínicos (Base Global OMS · ADA · AHA/DASH · ISSN)
+                    </label>
+                    <div className="list-stack" style={{ marginTop: '4px' }}>
+                      {MEDICAL_CONDITIONS.map(cond => {
+                        const checked = profMedicalConditions.includes(cond.id);
+                        return (
+                          <label
+                            key={cond.id}
+                            className="list-item-card"
+                            style={{ cursor: 'pointer', alignItems: 'flex-start', gap: '10px', padding: '10px 12px' }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleMedicalCondition(cond.id)}
+                              style={{ marginTop: '3px' }}
+                            />
+                            <div>
+                              <div style={{ fontWeight: 500, fontSize: '0.82rem' }}>{cond.label}</div>
+                              <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)' }}>
+                                {cond.source}
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="field-group">
+                    <label className="field-label">Factores físicos o notas para la IA (opcional)</label>
+                    <input
+                      type="text"
+                      className="input-clean"
+                      placeholder="Ej. Resistencia a la insulina, entreno en ayunas, intolerancia a la lactosa..."
+                      value={profPhysicalNotes}
+                      onChange={e => setProfPhysicalNotes(e.target.value)}
+                    />
                   </div>
 
                   <div className="field-group">
@@ -2057,31 +2755,61 @@ export default function App() {
               </div>
 
               <div className="card">
-                <div className="card-title">Estado actual de tu cuenta</div>
+                <div className="card-title">Diagnóstico físico, metabólico y país</div>
                 <div className="card-desc">
-                  Correo registrado: <strong>{currentUser.email}</strong>
+                  Correo registrado: <strong>{currentUser.email}</strong> · País seleccionado:{' '}
+                  <strong>{liveSelectedCountry.name}</strong>
                 </div>
 
                 <div className="list-stack">
                   <div className="list-item-card">
+                    <span>Tasa Metabólica Basal (TMB)</span>
+                    <strong>{liveProfileMetrics ? `${liveProfileMetrics.bmr} kcal/día` : 'Completa peso/estatura/edad'}</strong>
+                  </div>
+                  <div className="list-item-card">
+                    <span>Gasto Energético Total (GET)</span>
+                    <strong>{liveProfileMetrics ? `${liveProfileMetrics.tdee} kcal/día` : 'Pendiente'}</strong>
+                  </div>
+                  <div className="list-item-card">
+                    <span>Índice de Masa Corporal (IMC)</span>
+                    <strong>
+                      {liveProfileMetrics
+                        ? `${liveProfileMetrics.bmi} (${liveProfileMetrics.bmiCategory})`
+                        : 'Pendiente'}
+                    </strong>
+                  </div>
+                  <div className="list-item-card">
                     <span>Meta calórica configurada</span>
                     <strong>{goalKcal} kcal</strong>
                   </div>
-                  <div className="list-item-card">
-                    <span>Comidas guardadas en tu historial</span>
-                    <strong>{workspace.mealLogs?.length || 0}</strong>
+                  <div className="list-item-card" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                    <strong>Plus alimenticio de {liveSelectedCountry.name}</strong>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                      {liveSelectedCountry.productivityFocus}
+                    </span>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--accent)' }}>
+                      {liveSelectedCountry.nutritionalPlus}
+                    </span>
+                  </div>
+                  <div className="list-item-card" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                    <strong>Protocolos clínicos activos ({liveActiveProtocols.length})</strong>
+                    {liveActiveProtocols.length === 0 ? (
+                      <span style={{ fontSize: '0.77rem', color: 'var(--text-secondary)' }}>
+                        Ninguna condición médica marcada (guías generales OMS/FAO/ISSN activas).
+                      </span>
+                    ) : (
+                      liveActiveProtocols.map(p => (
+                        <span key={p.id} style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                          • <strong>{p.label}:</strong> {p.alertRule}
+                        </span>
+                      ))
+                    )}
                   </div>
                   <div className="list-item-card">
-                    <span>Consultas realizadas</span>
-                    <strong>{workspace.conversations?.length || 0}</strong>
-                  </div>
-                  <div className="list-item-card">
-                    <span>Documentos propios indexados</span>
-                    <strong>{workspace.documents?.length || 0}</strong>
-                  </div>
-                  <div className="list-item-card">
-                    <span>Registros de seguimiento de peso</span>
-                    <strong>{workspace.weightHistory?.length || 0}</strong>
+                    <span>Comidas / Consultas / Documentos</span>
+                    <strong>
+                      {workspace.mealLogs?.length || 0} / {workspace.conversations?.length || 0} / {workspace.documents?.length || 0}
+                    </strong>
                   </div>
                 </div>
               </div>
@@ -2089,6 +2817,130 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* COPILOTO IA OMNIPRESENTE (SABE EN QUÉ PANTALLA ESTÁS Y TE GUÍA EN TODO MOMENTO) */}
+      {copilotOpen && (() => {
+        const contextualActions =
+          activeSection === 'meals'
+            ? [
+                {
+                  label: 'Evaluar si mis platos hoy cumplen mis protocolos médicos',
+                  q: 'Evalúa si mis comidas registradas hoy cumplen mis protocolos médicos y mi meta de proteína.'
+                },
+                {
+                  label: `Alternativa más económica en ${processCoach.country.name}`,
+                  q: `Dame una alternativa de plato saludable y económica usando la productividad alimenticia de ${processCoach.country.name}.`
+                }
+              ]
+            : activeSection === 'documents'
+              ? [
+                  {
+                    label: 'Cruzar mis PDFs con las guías médicas globales',
+                    q: 'Cruza mis documentos guardados con las guías globales OMS/ADA/DASH y dime qué priorizar hoy.'
+                  }
+                ]
+              : activeSection === 'profile'
+                ? [
+                    {
+                      label: 'Explicar mi TMB, GET y metabolismo',
+                      q: 'Explícame mi TMB, GET y cómo manejar mi tipo de metabolismo en mi proceso diario.'
+                    }
+                  ]
+                : [
+                    {
+                      label: `¿Qué comer ahora en ${processCoach.country.name}?`,
+                      q: `Según mi país (${processCoach.country.name}), mi metabolismo y lo que me falta hoy, ¿qué comida me recomiendas ahora?`
+                    },
+                    {
+                      label: 'Revisar mi evolución y alertas clínicas',
+                      q: 'Revisa mi evolución de peso, promedio de comidas y condiciones médicas para darme el siguiente paso hoy.'
+                    }
+                  ];
+
+        return (
+          <div className="copilot-drawer">
+            <div className="copilot-header">
+              <div>
+                <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>
+                  Copiloto IA NutriStudio · {processCoach.country.name}
+                </div>
+                <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                  Contexto activo: <strong>{activeSection}</strong> · Memoria {userMemory.knowledgeScore}% · {todayTokenStats.used}/{TOKEN_GOVERNANCE.DAILY_TOKEN_BUDGET} tok
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn-ghost"
+                style={{ padding: '4px 8px' }}
+                onClick={() => setCopilotOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="copilot-body">
+              <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                Acciones rápidas para donde estás ahora:
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {contextualActions.map(act => (
+                  <button
+                    key={act.label}
+                    type="button"
+                    className="btn-outline"
+                    style={{ textAlign: 'left', fontSize: '0.78rem', padding: '7px 10px' }}
+                    onClick={() => handleCopilotAsk(act.q)}
+                    disabled={isCopilotLoading}
+                  >
+                    {act.label}
+                  </button>
+                ))}
+              </div>
+
+              {isCopilotLoading && (
+                <div className="copilot-reply">Analizando tu perfil, país y protocolos médicos…</div>
+              )}
+
+              {copilotReply && !isCopilotLoading && (
+                <div className="copilot-reply">
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
+                    Modo: <strong>{copilotReply.mode}</strong> · {copilotReply.tokensUsed} tokens · {copilotReply.latencyMs} ms
+                  </div>
+                  {renderFormattedText(copilotReply.answer)}
+                </div>
+              )}
+            </div>
+
+            <form
+              className="copilot-footer"
+              onSubmit={e => {
+                e.preventDefault();
+                handleCopilotAsk();
+              }}
+            >
+              <input
+                type="text"
+                className="input-clean"
+                style={{ fontSize: '0.8rem', padding: '8px 10px' }}
+                placeholder="Pregúntale al Copiloto desde aquí…"
+                value={copilotInput}
+                onChange={e => setCopilotInput(e.target.value)}
+              />
+              <button type="submit" className="btn-solid" disabled={isCopilotLoading}>
+                Enviar
+              </button>
+            </form>
+          </div>
+        );
+      })()}
+
+      <button
+        type="button"
+        className="copilot-fab"
+        onClick={() => setCopilotOpen(prev => !prev)}
+      >
+        <span>{copilotOpen ? 'Cerrar Copiloto IA' : 'Copiloto IA'}</span>
+      </button>
     </div>
   );
 }
