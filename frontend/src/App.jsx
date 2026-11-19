@@ -21,6 +21,13 @@ import {
   evaluateClinicalReconciliationRubric
 } from './services/clinicalSyncService';
 import {
+  FOOD_CATEGORIES,
+  DIET_PRESETS,
+  searchFoodDatabase,
+  scaleFoodPortion,
+  generateDailyMenuFromDatabase
+} from './services/foodDatabase';
+import {
   GOAL_OPTIONS,
   getTodayIso,
   loadUsers,
@@ -141,7 +148,12 @@ export default function App() {
   const [isSendingChat, setIsSendingChat] = useState(false);
 
   // Estado de Escáner y Registro de Comidas (inicia vacío hasta que el usuario suba o registre un plato)
-  const [mealEntryMode, setMealEntryMode] = useState('photo'); // 'photo' | 'manual'
+  const [mealEntryMode, setMealEntryMode] = useState('photo'); // 'photo' | 'database' | 'manual'
+  const [foodSearchQuery, setFoodSearchQuery] = useState('');
+  const [foodCategoryFilter, setFoodCategoryFilter] = useState('Todos');
+  const [foodPortionById, setFoodPortionById] = useState({});
+  const [selectedDietPreset, setSelectedDietPreset] = useState('equilibrada');
+  const [generatedMenu, setGeneratedMenu] = useState(null);
   const [customImagePreview, setCustomImagePreview] = useState(null);
   const [customMealNote, setCustomMealNote] = useState('');
   const [mealType, setMealType] = useState('Almuerzo');
@@ -646,6 +658,64 @@ export default function App() {
     updateWorkspace(prev => ({
       ...prev,
       mealLogs: (prev.mealLogs || []).filter(m => m.id !== mealId)
+    }));
+  };
+
+  const handleAddFoodFromDb = (food) => {
+    const grams = Number(foodPortionById[food.id]) || food.defaultGrams || 100;
+    const scaled = scaleFoodPortion(food, grams);
+    const newEntry = {
+      id: 'meal-db-' + Date.now(),
+      date: todayIso,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      mealType,
+      dishName: `${food.name} (${scaled.grams}g)`,
+      totalCalories: scaled.kcal,
+      carbsGrams: scaled.carbs,
+      proteinGrams: scaled.protein,
+      fatGrams: scaled.fat,
+      fiberGrams: scaled.fiber,
+      sodiumMg: scaled.sodiumMg,
+      potassiumMg: scaled.potassiumMg,
+      vitaminCMg: scaled.vitaminCMg,
+      qualityScore: food.qualityScore,
+      nutriGrade: food.nutriGrade,
+      glycemicLoad: `IG ${food.glycemicIndex} · NOVA ${food.novaGroup}`,
+      nutritionalAdvice: food.clinicalTag,
+      imagePreview: null
+    };
+    updateWorkspace(prev => ({
+      ...prev,
+      mealLogs: [newEntry, ...(prev.mealLogs || [])]
+    }));
+    setMealSavedNotice(`"${food.name}" (${scaled.grams}g · Nutri-Score ${food.nutriGrade}) agregado a tu día.`);
+    setTimeout(() => setMealSavedNotice(''), 3500);
+  };
+
+  const handleAddGeneratedMealToDay = (genMeal) => {
+    const newEntry = {
+      id: 'meal-gen-' + Date.now() + Math.random().toString(36).slice(2, 5),
+      date: todayIso,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      mealType: genMeal.mealType,
+      dishName: genMeal.dishName,
+      totalCalories: genMeal.kcal,
+      carbsGrams: genMeal.carbs,
+      proteinGrams: genMeal.protein,
+      fatGrams: genMeal.fat,
+      fiberGrams: genMeal.fiber,
+      sodiumMg: genMeal.sodiumMg,
+      potassiumMg: genMeal.potassiumMg,
+      vitaminCMg: genMeal.vitaminCMg,
+      qualityScore: genMeal.avgQuality,
+      nutriGrade: genMeal.nutriGrade,
+      glycemicLoad: `Menú IA · Calidad ${genMeal.avgQuality}/100`,
+      nutritionalAdvice: `Generado automáticamente por NutriStudio según tu país y meta calórica.`,
+      imagePreview: null
+    };
+    updateWorkspace(prev => ({
+      ...prev,
+      mealLogs: [newEntry, ...(prev.mealLogs || [])]
     }));
   };
 
@@ -1468,10 +1538,17 @@ export default function App() {
               </button>
               <button
                 type="button"
+                className={`subtab-btn ${summaryTab === 'menu' ? 'active' : ''}`}
+                onClick={() => setSummaryTab('menu')}
+              >
+                Menú Automático IA
+              </button>
+              <button
+                type="button"
                 className={`subtab-btn ${summaryTab === 'tracking' ? 'active' : ''}`}
                 onClick={() => setSummaryTab('tracking')}
               >
-                Comidas e Hidratación ({mealsToday.length})
+                Comidas, Micros y Agua ({mealsToday.length})
               </button>
               <button
                 type="button"
@@ -1481,6 +1558,105 @@ export default function App() {
                 Memoria Clínica IA ({userMemory.knowledgeScore}%)
               </button>
             </div>
+
+            {/* MENÚ AUTOMÁTICO IA (ESTILO EAT THIS MUCH + FITIA + PRODUCTIVIDAD LOCAL) */}
+            {summaryTab === 'menu' && (() => {
+              const activeMenu =
+                generatedMenu ||
+                generateDailyMenuFromDatabase({
+                  targetCalories: goalKcal || 2000,
+                  dietStyle: selectedDietPreset,
+                  countryId: currentUser.country || 'CO'
+                });
+              return (
+                <div className="card" style={{ marginBottom: '20px' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'flex-end',
+                      gap: '12px',
+                      flexWrap: 'wrap',
+                      marginBottom: '14px'
+                    }}
+                  >
+                    <div>
+                      <span className="tag-pill">
+                        Menú Automático Calibrado · {processCoach.country.name} · Calidad {activeMenu.dayTotals.avgQuality}/100 (Nutri-Score A)
+                      </span>
+                      <div className="card-title" style={{ marginTop: '8px' }}>
+                        Generador de Menú Diario (Eat This Much + Base Clínica)
+                      </div>
+                      <div className="card-desc" style={{ marginBottom: 0 }}>
+                        Total del menú: <strong>{activeMenu.dayTotals.kcal} kcal</strong> · {activeMenu.dayTotals.protein}g proteína · {activeMenu.dayTotals.carbs}g carbs · {activeMenu.dayTotals.fat}g grasas · {activeMenu.dayTotals.fiber}g fibra · {activeMenu.dayTotals.potassiumMg}mg potasio.
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                      <select
+                        className="input-clean"
+                        style={{ width: 'auto' }}
+                        value={selectedDietPreset}
+                        onChange={e => {
+                          const nextStyle = e.target.value;
+                          setSelectedDietPreset(nextStyle);
+                          setGeneratedMenu(
+                            generateDailyMenuFromDatabase({
+                              targetCalories: goalKcal || 2000,
+                              dietStyle: nextStyle,
+                              countryId: currentUser.country || 'CO'
+                            })
+                          );
+                        }}
+                      >
+                        {DIET_PRESETS.map(dp => (
+                          <option key={dp.id} value={dp.id}>
+                            {dp.label}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        className="btn-solid"
+                        onClick={() =>
+                          setGeneratedMenu(
+                            generateDailyMenuFromDatabase({
+                              targetCalories: goalKcal || 2000,
+                              dietStyle: selectedDietPreset,
+                              countryId: currentUser.country || 'CO'
+                            })
+                          )
+                        }
+                      >
+                        Recalibrar menú
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="split-grid">
+                    {activeMenu.meals.map(m => (
+                      <div key={m.mealType} className="list-item-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '8px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span className="tag-pill">{m.mealType} · Nutri-Score {m.nutriGrade} ({m.avgQuality}/100)</span>
+                          <strong>{m.kcal} kcal</strong>
+                        </div>
+                        <div style={{ fontSize: '0.84rem', fontWeight: 500 }}>{m.dishName}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                          P: {m.protein}g · C: {m.carbs}g · G: {m.fat}g · Fibra: {m.fiber}g · Sodio: {m.sodiumMg}mg
+                        </div>
+                        <button
+                          type="button"
+                          className="btn-outline"
+                          style={{ alignSelf: 'flex-start', padding: '6px 10px', fontSize: '0.76rem' }}
+                          onClick={() => handleAddGeneratedMealToDay(m)}
+                        >
+                          + Registrar {m.mealType.toLowerCase()} en mi día
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* ACOMPAÑAMIENTO ACTIVO DE LA IA EN EL PROCESO (PAÍS + METABOLISMO + POSIBILIDADES) */}
             {summaryTab === 'process' && (
@@ -1703,7 +1879,49 @@ export default function App() {
             </div>
             )}
 
-            {summaryTab === 'tracking' && (
+            {summaryTab === 'tracking' && (() => {
+              const fiberToday = mealsToday.reduce((a, m) => a + (Number(m.fiberGrams) || 0), 0);
+              const sodiumToday = mealsToday.reduce((a, m) => a + (Number(m.sodiumMg) || 0), 0);
+              const potassiumToday = mealsToday.reduce((a, m) => a + (Number(m.potassiumMg) || 0), 0);
+              const vitCToday = mealsToday.reduce((a, m) => a + (Number(m.vitaminCMg) || 0), 0);
+              const qualityScores = mealsToday
+                .map(m => Number(m.qualityScore || 0))
+                .filter(v => v > 0);
+              const avgQualityToday =
+                qualityScores.length > 0
+                  ? Math.round(qualityScores.reduce((a, b) => a + b, 0) / qualityScores.length)
+                  : null;
+
+              return (
+              <div>
+                <div className="card" style={{ marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
+                    <div className="card-title" style={{ marginBottom: 0 }}>
+                      Micronutrientes y Calidad Nutricional Hoy (Cronometer · Yuka)
+                    </div>
+                    <span className="tag-pill">
+                      Calidad Yuka hoy: {avgQualityToday !== null ? `${avgQualityToday}/100` : 'Registra desde Base de Alimentos'}
+                    </span>
+                  </div>
+                  <div className="stats-row" style={{ marginBottom: 0 }}>
+                    <div className="stat-box" style={{ padding: '12px' }}>
+                      <div className="stat-label">Fibra (meta 30g)</div>
+                      <div className="stat-value" style={{ fontSize: '1.05rem' }}>{fiberToday}g</div>
+                    </div>
+                    <div className="stat-box" style={{ padding: '12px' }}>
+                      <div className="stat-label">Sodio (límite DASH 2000mg)</div>
+                      <div className="stat-value" style={{ fontSize: '1.05rem' }}>{sodiumToday} mg</div>
+                    </div>
+                    <div className="stat-box" style={{ padding: '12px' }}>
+                      <div className="stat-label">Potasio (meta 3500mg)</div>
+                      <div className="stat-value" style={{ fontSize: '1.05rem' }}>{potassiumToday} mg</div>
+                    </div>
+                    <div className="stat-box" style={{ padding: '12px' }}>
+                      <div className="stat-label">Vitamina C (meta 90mg)</div>
+                      <div className="stat-value" style={{ fontSize: '1.05rem' }}>{vitCToday} mg</div>
+                    </div>
+                  </div>
+                </div>
             <div className="split-grid">
               <div className="card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
@@ -1830,7 +2048,9 @@ export default function App() {
                 )}
               </div>
             </div>
-            )}
+              </div>
+              );
+            })()}
           </div>
         )}
 
@@ -1850,24 +2070,148 @@ export default function App() {
 
             <div className="split-grid">
               <div className="card">
-                <div className="auth-switcher" style={{ marginBottom: '18px' }}>
+                <div className="auth-switcher" style={{ marginBottom: '18px', gridTemplateColumns: '1fr 1fr 1fr' }}>
                   <button
                     type="button"
                     className={`auth-switch-btn ${mealEntryMode === 'photo' ? 'active' : ''}`}
                     onClick={() => setMealEntryMode('photo')}
                   >
-                    Analizar foto del plato
+                    Foto IA
+                  </button>
+                  <button
+                    type="button"
+                    className={`auth-switch-btn ${mealEntryMode === 'database' ? 'active' : ''}`}
+                    onClick={() => setMealEntryMode('database')}
+                  >
+                    Base de alimentos
                   </button>
                   <button
                     type="button"
                     className={`auth-switch-btn ${mealEntryMode === 'manual' ? 'active' : ''}`}
                     onClick={() => setMealEntryMode('manual')}
                   >
-                    Registro manual
+                    Manual
                   </button>
                 </div>
 
-                {mealEntryMode === 'photo' ? (
+                {mealEntryMode === 'database' ? (() => {
+                  const matchedFoods = searchFoodDatabase({
+                    query: foodSearchQuery,
+                    category: foodCategoryFilter,
+                    countryId: currentUser.country || 'CO'
+                  });
+                  return (
+                    <div>
+                      <div className="form-stack" style={{ marginBottom: '12px' }}>
+                        <div className="field-row">
+                          <div className="field-group">
+                            <label className="field-label">Buscar en base nutricional (MyFitnessPal · Yuka · Cronometer)</label>
+                            <input
+                              type="text"
+                              className="input-clean"
+                              placeholder="Ej. pollo, aguacate, frijol, avena, salmón, gaseosa..."
+                              value={foodSearchQuery}
+                              onChange={e => setFoodSearchQuery(e.target.value)}
+                            />
+                          </div>
+                          <div className="field-group">
+                            <label className="field-label">Momento del día</label>
+                            <select
+                              className="input-clean"
+                              value={mealType}
+                              onChange={e => setMealType(e.target.value)}
+                            >
+                              <option value="Desayuno">Desayuno</option>
+                              <option value="Almuerzo">Almuerzo</option>
+                              <option value="Merienda">Merienda / Snack</option>
+                              <option value="Cena">Cena</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                          {FOOD_CATEGORIES.map(cat => (
+                            <button
+                              key={cat}
+                              type="button"
+                              className="copilot-chip"
+                              style={
+                                foodCategoryFilter === cat
+                                  ? { background: 'var(--accent)', color: '#fff', borderColor: 'var(--accent)' }
+                                  : undefined
+                              }
+                              onClick={() => setFoodCategoryFilter(cat)}
+                            >
+                              {cat}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {mealSavedNotice && (
+                        <div style={{ fontSize: '0.8rem', color: 'var(--accent)', fontWeight: 500, marginBottom: '10px' }}>
+                          {mealSavedNotice}
+                        </div>
+                      )}
+
+                      <div className="list-stack" style={{ maxHeight: '420px', overflowY: 'auto', paddingRight: '4px' }}>
+                        {matchedFoods.slice(0, 18).map(food => {
+                          const grams = Number(foodPortionById[food.id]) || food.defaultGrams || 100;
+                          const scaled = scaleFoodPortion(food, grams);
+                          const isWarning = food.qualityScore < 50;
+                          return (
+                            <div key={food.id} className="list-item-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '8px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                                <div>
+                                  <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{food.name}</div>
+                                  <div style={{ fontSize: '0.73rem', color: isWarning ? 'var(--danger-text)' : 'var(--text-secondary)', marginTop: '2px' }}>
+                                    {food.clinicalTag} · NOVA {food.novaGroup} · IG {food.glycemicIndex}
+                                  </div>
+                                </div>
+                                <span
+                                  className="tag-pill"
+                                  style={
+                                    isWarning
+                                      ? { background: 'var(--danger-soft)', color: 'var(--danger-text)' }
+                                      : undefined
+                                  }
+                                >
+                                  Nutri-Score {food.nutriGrade} · {food.qualityScore}/100
+                                </span>
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                  <strong>{scaled.kcal} kcal</strong> · P: {scaled.protein}g · C: {scaled.carbs}g · G: {scaled.fat}g · Fibra: {scaled.fiber}g · Na: {scaled.sodiumMg}mg · K: {scaled.potassiumMg}mg
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <input
+                                    type="number"
+                                    min="10"
+                                    max="1000"
+                                    className="input-clean"
+                                    style={{ width: '74px', padding: '5px 8px', fontSize: '0.78rem' }}
+                                    value={grams}
+                                    onChange={e =>
+                                      setFoodPortionById(prev => ({ ...prev, [food.id]: e.target.value }))
+                                    }
+                                  />
+                                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>g</span>
+                                  <button
+                                    type="button"
+                                    className="btn-solid"
+                                    style={{ padding: '6px 10px', fontSize: '0.76rem' }}
+                                    onClick={() => handleAddFoodFromDb(food)}
+                                  >
+                                    + Agregar
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })() : mealEntryMode === 'photo' ? (
                   <>
                     <div className="form-stack" style={{ marginBottom: '16px' }}>
                       <div className="field-row">
