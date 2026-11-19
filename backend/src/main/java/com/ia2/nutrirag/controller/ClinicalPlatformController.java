@@ -1,5 +1,6 @@
 package com.ia2.nutrirag.controller;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -7,6 +8,13 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -16,12 +24,15 @@ import java.util.Map;
  * Endpoints REST de la Plataforma Clínica Nutricional (NutriStudio AI):
  * - Productividad alimenticia por país
  * - Rúbricas médicas globales (OMS, FAO, ADA, AHA/DASH, ISSN, ESPEN, KDIGO, EASL)
- * - Rúbrica de coordinación clínica HL7 FHIR por correo con consentimiento informado
+ * - Conector real SMART on FHIR R4 (HAPI FHIR / SMART Health IT) con consentimiento informado
  * - Política de gobernanza y ahorro de tokens para uso diario continuo
  */
 @RestController
 @RequestMapping("/api/platform")
 public class ClinicalPlatformController {
+
+    @Value("${nutrirag.fhir.base-url:https://hapi.fhir.org/baseR4}")
+    private String configuredFhirBaseUrl;
 
     @GetMapping("/countries")
     public List<Map<String, Object>> getCountryFoodProductivity() {
@@ -104,6 +115,71 @@ public class ClinicalPlatformController {
                 "reconciledAt", LocalDateTime.now().toString()
         ));
     }
+
+    @PostMapping("/fhir/sandbox-connect")
+    public ResponseEntity<Map<String, Object>> connectFhirSandbox(@RequestBody FhirSandboxConnectRequest req) {
+        if (!req.consentGranted()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "connected", false,
+                    "isRealFhirData", false,
+                    "error", "Se requiere consentimiento informado explícito (SMART on FHIR / Ley 1581 / GDPR) antes de consultar un servidor FHIR."
+            ));
+        }
+
+        String baseUrl = (req.sandboxUrl() != null && !req.sandboxUrl().isBlank()
+                ? req.sandboxUrl()
+                : configuredFhirBaseUrl).replaceAll("/$", "");
+        String patientId = req.patientFhirId() != null ? req.patientFhirId().trim() : "";
+        String email = req.email() != null ? req.email().trim().toLowerCase() : "";
+
+        try {
+            HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(4)).build();
+            String patientQuery = !patientId.isEmpty()
+                    ? baseUrl + "/Patient/" + URLEncoder.encode(patientId, StandardCharsets.UTF_8)
+                    : baseUrl + "/Patient?email=" + URLEncoder.encode(email, StandardCharsets.UTF_8) + "&_count=1";
+
+            HttpRequest httpReq = HttpRequest.newBuilder()
+                    .uri(URI.create(patientQuery))
+                    .timeout(Duration.ofSeconds(4))
+                    .header("Accept", "application/fhir+json, application/json")
+                    .GET()
+                    .build();
+
+            HttpResponse<String> resp = client.send(httpReq, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() < 200 || resp.statusCode() >= 300 || !resp.body().contains("\"Patient\"")) {
+                return ResponseEntity.ok(Map.of(
+                        "connected", false,
+                        "isRealFhirData", false,
+                        "status", "NO_PATIENT_RECORDS_FOUND",
+                        "fhirBaseUrl", baseUrl,
+                        "message", "Servidor FHIR R4 consultado, pero sin recurso Patient/Observation real para este identificador. Nunca se generan datos clínicos ficticios."
+                ));
+            }
+
+            return ResponseEntity.ok(Map.of(
+                    "connected", true,
+                    "isRealFhirData", true,
+                    "status", "CONNECTED_FHIR_R4",
+                    "fhirBaseUrl", baseUrl,
+                    "rawPatientPreview", resp.body().substring(0, Math.min(350, resp.body().length()))
+            ));
+        } catch (Exception ex) {
+            return ResponseEntity.ok(Map.of(
+                    "connected", false,
+                    "isRealFhirData", false,
+                    "status", "NO_REAL_FHIR_CONNECTION",
+                    "fhirBaseUrl", baseUrl,
+                    "message", "Sin conexión activa al sandbox SMART on FHIR R4 (" + ex.getMessage() + "). Nunca se muestran datos clínicos ficticios."
+            ));
+        }
+    }
+
+    public record FhirSandboxConnectRequest(
+            String patientFhirId,
+            String email,
+            String sandboxUrl,
+            boolean consentGranted
+    ) {}
 
     public record FhirReconcileRequest(
             String appEmail,

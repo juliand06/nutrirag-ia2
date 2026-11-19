@@ -59,8 +59,25 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers("/api/health", "/api/auth/**", "/api/platform/countries", "/api/platform/clinical-rubrics").permitAll()
-                        .requestMatchers("/api/me/**", "/api/documents/**", "/api/rag/**", "/api/vision/**").authenticated()
+                        .requestMatchers(
+                                "/api/health",
+                                "/actuator/**",
+                                "/api/auth/**",
+                                "/api/platform/countries",
+                                "/api/platform/clinical-rubrics",
+                                "/api/platform/fhir/sandbox-connect",
+                                "/api/billing/webhook",
+                                "/api/observability/events"
+                        ).permitAll()
+                        .requestMatchers(
+                                "/api/me/**",
+                                "/api/documents/**",
+                                "/api/rag/**",
+                                "/api/vision/**",
+                                "/api/nutritionist/**",
+                                "/api/billing/subscription",
+                                "/api/billing/checkout-session"
+                        ).authenticated()
                         .anyRequest().permitAll()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)

@@ -1,0 +1,116 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: nutrirag-pgvector-staging
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nutrirag_staging}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_DB: ${POSTGRES_DB:-nutrirag_staging_db}
+    volumes:
+      - pgvector_staging_data:/var/lib/postgresql/data
+      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+      - ./docker/backup-postgres.sh:/scripts/backup-postgres.sh:ro
+      - ./docker/restore-postgres.sh:/scripts/restore-postgres.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nutrirag_staging} -d ${POSTGRES_DB:-nutrirag_staging_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nutrirag-api-staging
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: staging
+      POSTGRES_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-nutrirag_staging_db}
+      POSTGRES_USER: ${POSTGRES_USER:-nutrirag_staging}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET required}
+      ENCRYPTION_MASTER_KEY: ${ENCRYPTION_MASTER_KEY:?ENCRYPTION_MASTER_KEY required}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,https://staging.nutristudio.example.com}
+      FHIR_BASE_URL: ${FHIR_BASE_URL:-https://hapi.fhir.org/baseR4}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      AI_PROVIDER: ${AI_PROVIDER:-DEMO}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080/api}
+        VITE_FHIR_SANDBOX_URL: ${VITE_FHIR_SANDBOX_URL:-https://hapi.fhir.org/baseR4}
+        VITE_STRIPE_PUBLISHABLE_KEY: ${VITE_STRIPE_PUBLISHABLE_KEY:-}
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+    container_name: nutrirag-web-staging
+    depends_on:
+      - api
+    ports:
+      - "3000:80"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: nutrirag-prometheus-staging
+    volumes:
+      - ./docker/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: nutrirag-grafana-staging
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change_me_staging}
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_staging_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  db-backup:
+    image: pgvector/pgvector:pg16
+    container_name: nutrirag-backup-staging
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-nutrirag_staging}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      PGDATABASE: ${POSTGRES_DB:-nutrirag_staging_db}
+      BACKUP_RETENTION_DAYS: "14"
+    volumes:
+      - ./docker/backup-postgres.sh:/usr/local/bin/backup-postgres.sh:ro
+      - pg_staging_backups:/backups
+    entrypoint: ["/bin/sh", "-c", "while true; do /usr/local/bin/backup-postgres.sh; sleep 86400; done"]
+    restart: unless-stopped
+
+volumes:
+  pgvector_staging_data:
+  grafana_staging_data:
+  pg_staging_backups:

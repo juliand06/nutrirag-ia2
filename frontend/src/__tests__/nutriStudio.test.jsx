@@ -6,6 +6,8 @@ import { formatWeight, formatHeight } from '../i18n';
 import { Button, Card, Chip, Toast, Skeleton } from '../design-system';
 import HealthDisclaimer from '../components/HealthDisclaimer';
 import LandingPage from '../components/LandingPage';
+import NutritionistPortalSection from '../components/NutritionistPortalSection';
+import BillingPrivacyObservabilitySection from '../components/BillingPrivacyObservabilitySection';
 import { registerNewUser, authenticateUser, loadUsers } from '../services/userStorage';
 import { searchFoodDatabase, scaleFoodPortion, generateDailyMenuFromDatabase } from '../services/foodDatabase';
 import { evaluateNutritionGuardrail } from '../services/nutriRagEngine';
@@ -13,6 +15,30 @@ import { parseNutritionCsvImport } from '../services/openFoodFactsService';
 import { computeGamificationState, computeWellnessCorrelations } from '../services/retentionEngine';
 import { evaluateClinicalSafety } from '../services/clinicalSafetyGuard';
 import { runRagEvaluationBenchmark } from '../services/ragEvaluationDataset';
+import {
+  connectSmartOnFhirSandbox,
+  buildInitialClinicalRecordForEmail,
+  runFederatedClinicalDiscovery
+} from '../services/clinicalSyncService';
+import {
+  loadNutritionistPortalState,
+  addNutritionistPatient,
+  assignNutritionPlanToPatient,
+  addNutritionistClinicalNote,
+  sendNutritionistChatMessage,
+  buildNutritionistPatientReportHtml,
+  checkPlanFeatureAccess,
+  startStripeCheckoutSession,
+  cancelStripeSubscription,
+  encryptSensitiveData,
+  decryptSensitiveData,
+  updateGranularConsent,
+  getAuditLogs,
+  buildGdprExportPackage,
+  purgeAllUserDataGdpr,
+  trackAnonymousProductEvent,
+  logStructuredEvent
+} from '../services/enterprisePlatformService';
 
 describe('NutriStudio AI — Fases 1-4 Suite Completa', () => {
   beforeEach(() => {
@@ -132,5 +158,177 @@ describe('NutriStudio AI — Fases 1-4 Suite Completa', () => {
     );
     expect(screen.getByText('Acción')).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('Guardado');
+  });
+
+  it('FASE 5 — SMART on FHIR exige consentimiento y nunca inventa datos clínicos ficticios', async () => {
+    await expect(
+      connectSmartOnFhirSandbox({ email: 'pac@test.com', consentGranted: false })
+    ).rejects.toThrow(/consentimiento/i);
+
+    const offline = await connectSmartOnFhirSandbox({
+      email: 'pac@test.com',
+      patientFhirId: 'example',
+      consentGranted: true,
+      fetchImpl: async () => {
+        throw new Error('Network unreachable');
+      }
+    });
+    expect(offline.connected).toBe(false);
+    expect(offline.isRealFhirData).toBe(false);
+    expect(offline.clinicalRecord).toBeNull();
+    expect(offline.message).toMatch(/nunca se muestran datos ficticios/i);
+
+    const syncDisc = runFederatedClinicalDiscovery({ email: 'pac@test.com', consentGranted: true });
+    expect(syncDisc.connected).toBe(false);
+    expect(syncDisc.clinicalRecord).toBeNull();
+    expect(buildInitialClinicalRecordForEmail({ email: 'pac@test.com' })).toBeNull();
+
+    const blankManual = buildInitialClinicalRecordForEmail({
+      email: 'pac@test.com',
+      allowManualBlank: true
+    });
+    expect(blankManual.fastingGlucose).toBeNull();
+    expect(blankManual.isRealFhirData).toBe(false);
+
+    const mockFetch = async (url) => {
+      if (url.includes('/Patient/')) {
+        return {
+          ok: true,
+          json: async () => ({
+            resourceType: 'Patient',
+            id: 'fhir-123',
+            telecom: [{ system: 'email', value: 'pac@test.com' }]
+          })
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          resourceType: 'Bundle',
+          entry: [
+            {
+              resource: {
+                resourceType: 'Observation',
+                id: 'obs-glu',
+                effectiveDateTime: '2026-11-18',
+                code: { coding: [{ code: '1558-6' }] },
+                valueQuantity: { value: 104, unit: 'mg/dL' }
+              }
+            },
+            {
+              resource: {
+                resourceType: 'Observation',
+                id: 'obs-a1c',
+                effectiveDateTime: '2026-11-18',
+                code: { coding: [{ code: '4548-4' }] },
+                valueQuantity: { value: 5.8, unit: '%' }
+              }
+            }
+          ]
+        })
+      };
+    };
+
+    const connected = await connectSmartOnFhirSandbox({
+      email: 'pac@test.com',
+      patientFhirId: 'fhir-123',
+      consentGranted: true,
+      fetchImpl: mockFetch
+    });
+    expect(connected.connected).toBe(true);
+    expect(connected.isRealFhirData).toBe(true);
+    expect(connected.clinicalRecord.fastingGlucose).toBe(104);
+    expect(connected.clinicalRecord.hba1c).toBe(5.8);
+    expect(connected.clinicalRecord.ldlCholesterol).toBeNull();
+  });
+
+  it('FASE 5 — Portal de Nutricionistas: pacientes, plan, notas SOAP, chat y PDF', async () => {
+    const user = { id: 'u-nutri', name: 'Carlos Ruiz', email: 'carlos@test.com', dailyCalories: 2100 };
+    const initial = loadNutritionistPortalState(user);
+    expect(initial.patients[0].fhirConnected).toBe(false);
+
+    const { patient } = addNutritionistPatient(user.id, {
+      name: 'Laura Gómez',
+      email: 'laura@test.com',
+      dailyCalories: 1750
+    });
+    await assignNutritionPlanToPatient(user.id, patient.id, {
+      dailyCalories: 1850,
+      targetProtein: 135,
+      targetCarbs: 180,
+      targetFat: 62,
+      clinicalProtocol: 'ADA Bajo Índice Glucémico',
+      notes: 'Priorizar orden fibra -> proteína -> carbohidrato.'
+    }, user.email);
+
+    addNutritionistClinicalNote(user.id, patient.id, {
+      soapSection: 'Objetivo',
+      text: 'Adherencia del 88% sin síntomas digestivos.'
+    });
+    const { state: finalState } = sendNutritionistChatMessage(user.id, patient.id, {
+      senderRole: 'NUTRITIONIST',
+      text: 'Excelente progreso esta semana.'
+    });
+
+    const updatedPat = finalState.patients.find(p => p.id === patient.id);
+    expect(updatedPat.assignedPlan.dailyCalories).toBe(1850);
+    expect(updatedPat.clinicalNotes).toHaveLength(1);
+    expect(updatedPat.chatMessages).toHaveLength(1);
+
+    const htmlReport = buildNutritionistPatientReportHtml(updatedPat, finalState.nutritionistProfile);
+    expect(htmlReport).toContain('Orientación informativa; no reemplaza a un profesional.');
+    expect(htmlReport).toContain('Laura Gómez');
+
+    render(<NutritionistPortalSection currentUser={user} />);
+    expect(screen.getByText(/Portal para Nutricionistas Clínicos/i)).toBeInTheDocument();
+  });
+
+  it('FASE 5 — Suscripciones Stripe, privacidad GDPR/Ley 1581, cifrado y observabilidad sin PII', async () => {
+    const registered = await registerNewUser({
+      name: 'Elena Vargas',
+      email: 'elena@test.com',
+      password: 'PasswordSegura123',
+      country: 'CO',
+      age: 31,
+      weightKg: 60,
+      heightCm: 164
+    });
+
+    expect(checkPlanFeatureAccess({ userId: registered.id, feature: 'ragQuery', currentDailyCount: 5 }).allowed).toBe(false);
+    await startStripeCheckoutSession({ userId: registered.id, email: registered.email, planId: 'PRO' });
+    expect(checkPlanFeatureAccess({ userId: registered.id, feature: 'ragQuery', currentDailyCount: 50 }).allowed).toBe(true);
+
+    const encrypted = await encryptSensitiveData('Glucosa reportada: 92 mg/dL', registered.id);
+    const decrypted = await decryptSensitiveData(encrypted, registered.id);
+    expect(decrypted).toBe('Glucosa reportada: 92 mg/dL');
+
+    await updateGranularConsent(registered.id, 'anonymousProductAnalytics', false, registered.email);
+    const blockedEvent = await trackAnonymousProductEvent('meal_logged', { email: registered.email }, registered.id);
+    expect(blockedEvent.tracked).toBe(false);
+
+    await updateGranularConsent(registered.id, 'anonymousProductAnalytics', true, registered.email);
+    const trackedEvent = await trackAnonymousProductEvent('meal_logged', { email: registered.email, kcal: 420 }, registered.id);
+    expect(trackedEvent.tracked).toBe(true);
+    expect(trackedEvent.event.properties.email).toBe('[REDACTED_PII]');
+
+    const structured = logStructuredEvent({
+      level: 'INFO',
+      category: 'TEST',
+      message: 'Prueba log',
+      context: { email: registered.email, route: '/salud' }
+    });
+    expect(structured.sanitizedContext.email).toBe('[REDACTED_PII]');
+
+    const gdprPkg = await buildGdprExportPackage({ user: registered, workspace: { mealLogs: [] } });
+    expect(gdprPkg.exportStandard).toContain('Ley 1581');
+    expect(gdprPkg.profile.passwordHash).toBeUndefined();
+    expect(getAuditLogs(registered.id).length).toBeGreaterThanOrEqual(3);
+
+    render(<BillingPrivacyObservabilitySection currentUser={registered} workspace={{ mealLogs: [] }} />);
+    expect(screen.getByText(/Consentimiento Granular, Cifrado AES-256-GCM/i)).toBeInTheDocument();
+
+    await cancelStripeSubscription(registered.id, registered.email);
+    await purgeAllUserDataGdpr(registered.id);
+    expect(loadUsers().some(u => u.id === registered.id)).toBe(false);
   });
 });

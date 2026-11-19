@@ -29,11 +29,17 @@ import {
   getActiveMedicalProtocols
 } from './services/clinicalKnowledgeBase';
 import {
-  CLINICAL_INSTITUTIONS,
+  FHIR_SANDBOX_ENDPOINTS,
   buildInitialClinicalRecordForEmail,
-  runFederatedClinicalDiscovery,
+  connectSmartOnFhirSandbox,
   evaluateClinicalReconciliationRubric
 } from './services/clinicalSyncService';
+import {
+  checkPlanFeatureAccess,
+  trackAnonymousProductEvent,
+  appendAuditLog,
+  logStructuredEvent
+} from './services/enterprisePlatformService';
 import {
   FOOD_CATEGORIES,
   DIET_PRESETS,
@@ -82,6 +88,10 @@ import { searchOpenFoodFactsCatalog } from './services/openFoodFactsService';
 
 const BarcodeScannerPanel = lazy(() => import('./components/BarcodeScannerPanel'));
 const NutritionChartsPanel = lazy(() => import('./components/NutritionChartsPanel'));
+const NutritionistPortalSection = lazy(() => import('./components/NutritionistPortalSection'));
+const BillingPrivacyObservabilitySection = lazy(() =>
+  import('./components/BillingPrivacyObservabilitySection')
+);
 
 export default function App() {
   // SEGURIDAD: Ninguna clave de API se expone en el navegador; el backend proxy maneja las llamadas LLM si está activo.
@@ -111,6 +121,7 @@ export default function App() {
     if (pathname.startsWith('/asistente')) return 'chat';
     if (pathname.startsWith('/planes')) return 'documents';
     if (pathname.startsWith('/salud')) return 'analytics';
+    if (pathname.startsWith('/nutricionista')) return 'nutritionist';
     if (pathname.startsWith('/perfil')) return 'profile';
     return 'summary';
   };
@@ -122,6 +133,7 @@ export default function App() {
       chat: '/asistente',
       documents: '/planes',
       analytics: '/salud',
+      nutritionist: '/nutricionista',
       profile: '/perfil'
     };
     return map[sec] || '/dashboard';
@@ -237,9 +249,16 @@ export default function App() {
   const [copilotReply, setCopilotReply] = useState(null);
   const [isCopilotLoading, setIsCopilotLoading] = useState(false);
 
-  // Vinculación Clínica / Hospitalaria por correo (Gmail/Email)
-  const [selectedInstitutionId, setSelectedInstitutionId] = useState(CLINICAL_INSTITUTIONS[0].id);
-  const [clinicalConsentChecked, setClinicalConsentChecked] = useState(true);
+  // Vinculación Clínica SMART on FHIR R4 con consentimiento explícito (sin simulaciones ficticias)
+  const [selectedInstitutionId, setSelectedInstitutionId] = useState(FHIR_SANDBOX_ENDPOINTS[0].id);
+  const [clinicalConsentChecked, setClinicalConsentChecked] = useState(false);
+  const [fhirPatientIdInput, setFhirPatientIdInput] = useState('');
+  const [fhirConnectionState, setFhirConnectionState] = useState({
+    connected: false,
+    status: 'DISCONNECTED',
+    isConnectingFhir: false,
+    message: ''
+  });
   const [clinicalSyncNotice, setClinicalSyncNotice] = useState('');
 
   useEffect(() => {
@@ -422,6 +441,18 @@ export default function App() {
     const q = (forcedQuestion !== undefined ? forcedQuestion : chatInput).trim();
     if (!q || isSendingChat) return;
 
+    const currentDailyQueries = workspace?.tokenUsageByDate?.[todayIso]?.queries || 0;
+    const quota = checkPlanFeatureAccess({
+      userId: currentUser?.id,
+      feature: 'ragQuery',
+      currentDailyCount: currentDailyQueries
+    });
+    if (!quota.allowed) {
+      showToast(quota.reason, 'warm');
+      setTimeout(() => clearToast(), 4500);
+      return;
+    }
+
     const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const userMsg = {
       id: 'usr-' + Date.now(),
@@ -548,6 +579,17 @@ export default function App() {
             : c
         )
       };
+    });
+    trackAnonymousProductEvent(
+      'rag_query_completed',
+      { mode: routingMode, latencyMs, guardrailTriggered: Boolean(result.guardrailTriggered) },
+      currentUser?.id
+    );
+    logStructuredEvent({
+      level: 'INFO',
+      category: 'RAG_QUERY',
+      message: 'Consulta nutricional completada',
+      context: { mode: routingMode, latencyMs }
     });
     setIsSendingChat(false);
   };
@@ -966,48 +1008,98 @@ export default function App() {
     setIsCopilotLoading(false);
   };
 
-  const handleSyncClinicByEmail = () => {
+  const handleConnectSmartFhir = async () => {
     if (!currentUser) return;
     if (!clinicalConsentChecked) {
       setClinicalSyncNotice(
-        'Debes autorizar el consentimiento informado (SMART on FHIR) antes de consultar tu expediente.'
+        'Debes marcar el consentimiento informado explícito (SMART on FHIR / Ley 1581 / GDPR) antes de consultar un servidor FHIR.'
       );
       return;
     }
-    const synced = buildInitialClinicalRecordForEmail({
+
+    setFhirConnectionState(prev => ({ ...prev, isConnectingFhir: true }));
+    try {
+      const res = await connectSmartOnFhirSandbox({
+        email: currentUser.email,
+        patientFhirId: fhirPatientIdInput,
+        sandboxId: selectedInstitutionId,
+        consentGranted: clinicalConsentChecked
+      });
+      setFhirConnectionState({ ...res, isConnectingFhir: false });
+
+      await appendAuditLog({
+        userId: currentUser.id,
+        actorEmail: currentUser.email,
+        action: 'FHIR_SANDBOX_QUERY',
+        details: `Consulta SMART on FHIR (${res.sandboxId}): ${res.status}`
+      });
+      await trackAnonymousProductEvent(
+        'fhir_sandbox_attempt',
+        { sandboxId: res.sandboxId, connected: res.connected, status: res.status },
+        currentUser.id
+      );
+
+      if (res.connected && res.clinicalRecord) {
+        updateWorkspace(prev => ({
+          ...prev,
+          clinicalRecord: res.clinicalRecord
+        }));
+      }
+      setClinicalSyncNotice(res.message);
+      setTimeout(() => setClinicalSyncNotice(''), 6500);
+    } catch (err) {
+      setFhirConnectionState({
+        connected: false,
+        status: 'ERROR',
+        isConnectingFhir: false,
+        message: err.message
+      });
+      setClinicalSyncNotice(err.message);
+    }
+  };
+
+  const handleStartManualClinicalRecord = async () => {
+    if (!currentUser) return;
+    if (!clinicalConsentChecked) {
+      setClinicalSyncNotice(
+        'Autoriza el consentimiento explícito para almacenar tus resultados clínicos ingresados manualmente.'
+      );
+      return;
+    }
+    const blank = buildInitialClinicalRecordForEmail({
       email: currentUser.email,
       institutionId: selectedInstitutionId,
-      userWeightKg: currentUser.weightKg
+      userWeightKg: currentUser.weightKg,
+      allowManualBlank: true
     });
     updateWorkspace(prev => ({
       ...prev,
-      clinicalRecord: synced
+      clinicalRecord: blank
     }));
+    await appendAuditLog({
+      userId: currentUser.id,
+      actorEmail: currentUser.email,
+      action: 'MANUAL_CLINICAL_ENTRY_STARTED',
+      details: 'Registro manual en blanco habilitado (sin conexión FHIR activa)'
+    });
     setClinicalSyncNotice(
-      `Expediente clínico vinculado mediante ${currentUser.email} (${synced.institutionName}).`
+      'Modo manual habilitado en blanco: ingresa tus resultados reales de laboratorio. Sin conexión FHIR activa.'
     );
-    setTimeout(() => setClinicalSyncNotice(''), 4500);
+    setTimeout(() => setClinicalSyncNotice(''), 5500);
   };
 
-  const handleFederatedHospitalDiscovery = () => {
-    if (!currentUser) return;
-    try {
-      const consolidated = runFederatedClinicalDiscovery({
-        email: currentUser.email,
-        userWeightKg: currentUser.weightKg,
-        consentGranted: clinicalConsentChecked
-      });
-      updateWorkspace(prev => ({
-        ...prev,
-        clinicalRecord: consolidated
-      }));
-      setClinicalSyncNotice(
-        `Red Federada HL7 FHIR consultada con éxito para ${currentUser.email}: ${consolidated.federatedSources.length} instituciones consolidadas.`
-      );
-      setTimeout(() => setClinicalSyncNotice(''), 5000);
-    } catch (err) {
-      setClinicalSyncNotice(err.message);
-    }
+  const handleClearClinicalRecord = () => {
+    updateWorkspace(prev => ({
+      ...prev,
+      clinicalRecord: null
+    }));
+    setFhirConnectionState({
+      connected: false,
+      status: 'DISCONNECTED',
+      isConnectingFhir: false,
+      message: 'Registro clínico desconectado. Ningún dato ficticio en pantalla.'
+    });
+    setClinicalSyncNotice('');
   };
 
   const handleUpdateClinicalField = (field, value) => {
@@ -3097,8 +3189,13 @@ export default function App() {
             setClinicalConsentChecked={setClinicalConsentChecked}
             selectedInstitutionId={selectedInstitutionId}
             setSelectedInstitutionId={setSelectedInstitutionId}
+            fhirPatientIdInput={fhirPatientIdInput}
+            setFhirPatientIdInput={setFhirPatientIdInput}
+            fhirConnectionState={fhirConnectionState}
             clinicalSyncNotice={clinicalSyncNotice}
-            onFederatedDiscovery={handleFederatedHospitalDiscovery}
+            onConnectSmartFhir={handleConnectSmartFhir}
+            onStartManualClinicalRecord={handleStartManualClinicalRecord}
+            onClearClinicalRecord={handleClearClinicalRecord}
             onUpdateClinicalField={handleUpdateClinicalField}
             onApplyRubricConditions={handleApplyRubricConditionsToProfile}
             onExportPdf={() =>
@@ -3146,6 +3243,27 @@ export default function App() {
             <NutritionChartsPanel workspace={workspace} userProfile={currentUser} />
           </Suspense>
           </>
+        )}
+
+        {activeSection === 'nutritionist' && (
+          <Suspense fallback={<Skeleton height="320px" />}>
+            <NutritionistPortalSection
+              currentUser={currentUser}
+              onApplyPlanToCurrentUser={(planTargets) => {
+                const updated = updateUserProfile(currentUser.id, planTargets);
+                if (updated) {
+                  setCurrentUser(updated);
+                  showToast('Plan nutricional del especialista aplicado a tu perfil.');
+                  setTimeout(() => clearToast(), 3200);
+                }
+              }}
+              onUpgradeToProClick={() => setActiveSection('profile')}
+              onNotify={(msg) => {
+                showToast(msg);
+                setTimeout(() => clearToast(), 3200);
+              }}
+            />
+          </Suspense>
         )}
 
         {activeSection === 'profile' && (
@@ -3487,6 +3605,27 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            <Suspense fallback={<Skeleton height="280px" style={{ marginTop: '20px' }} />}>
+              <BillingPrivacyObservabilitySection
+                currentUser={currentUser}
+                workspace={workspace}
+                dailyRagCount={workspace?.tokenUsageByDate?.[todayIso]?.queries || 0}
+                dailyVisionCount={(workspace?.mealLogs || []).filter(m => m.date === todayIso && m.source === 'vision').length}
+                apiBaseUrl={aiConfig.backendUrl}
+                onAccountPurged={() => {
+                  setCurrentUser(null);
+                  setShowLanding(true);
+                  navigate('/');
+                  showToast('Cuenta y datos suprimidos bajo GDPR / Ley 1581.');
+                  setTimeout(() => clearToast(), 4000);
+                }}
+                onNotify={(msg) => {
+                  showToast(msg);
+                  setTimeout(() => clearToast(), 3200);
+                }}
+              />
+            </Suspense>
           </div>
         )}
       </main>

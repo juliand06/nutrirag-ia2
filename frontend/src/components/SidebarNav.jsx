@@ -90,6 +90,16 @@ export default function SidebarNav({
           </button>
           <button
             type="button"
+            className={`sidebar-link ${activeSection === 'nutritionist' ? 'active' : ''}`}
+            aria-current={activeSection === 'nutritionist' ? 'page' : undefined}
+            onClick={() => onSelectSection('nutritionist')}
+          >
+            <span className="sidebar-link-label">
+              <span aria-hidden="true">👩‍⚕️</span> {t('nav.nutritionist')}
+            </span>
+          </button>
+          <button
+            type="button"
             className={`sidebar-link ${activeSection === 'profile' ? 'active' : ''}`}
             aria-current={activeSection === 'profile' ? 'page' : undefined}
             onClick={() => onSelectSection('profile')}

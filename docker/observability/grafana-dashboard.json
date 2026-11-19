@@ -1,0 +1,48 @@
+{
+  "title": "NutriStudio AI — Observabilidad & Producto",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "HTTP Request Rate & Latency (Micrometer)",
+      "targets": [
+        { "expr": "rate(http_server_requests_seconds_count[5m])", "legendFormat": "{{uri}} ({{status}})" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Stripe Checkout Sessions",
+      "targets": [
+        { "expr": "nutrirag_billing_checkout_sessions_total" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Eventos de Producto Anónimos",
+      "targets": [
+        { "expr": "rate(nutrirag_product_events_total[5m])", "legendFormat": "{{event}}" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Solicitudes Derecho al Olvido (GDPR / Ley 1581)",
+      "targets": [
+        { "expr": "nutrirag_privacy_erasure_requests_total" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "JVM Heap Used",
+      "targets": [
+        { "expr": "jvm_memory_used_bytes{area='heap'}", "legendFormat": "{{id}}" }
+      ]
+    }
+  ]
+}

@@ -163,3 +163,28 @@ export const apiCreateProgress = (body) =>
   apiFetch('/me/progress', { method: 'POST', body: JSON.stringify(body) });
 export const apiRagQuery = (question, tenantId) =>
   apiFetch('/rag/query', { method: 'POST', body: JSON.stringify({ question, tenantId }) });
+
+// Fase 5: FHIR Sandbox, Suscripciones Stripe, Privacidad GDPR/Ley 1581, Portal Nutricionista y Observabilidad
+export const apiConnectFhirSandbox = (payload) =>
+  apiFetch('/platform/fhir/sandbox-connect', { method: 'POST', body: JSON.stringify(payload) });
+export const apiGetSubscription = () => apiFetch('/billing/subscription');
+export const apiCreateCheckoutSession = (payload) =>
+  apiFetch('/billing/checkout-session', { method: 'POST', body: JSON.stringify(payload) });
+export const apiGetPrivacyConsents = () => apiFetch('/me/privacy/consents');
+export const apiUpdatePrivacyConsents = (payload) =>
+  apiFetch('/me/privacy/consents', { method: 'PUT', body: JSON.stringify(payload) });
+export const apiExportPrivacyData = () => apiFetch('/me/privacy/export');
+export const apiDeletePrivacyAccount = () =>
+  apiFetch('/me/privacy/account', { method: 'DELETE' });
+export const apiGetAuditLogs = () => apiFetch('/me/privacy/audit-logs');
+export const apiGetNutritionistPatients = () => apiFetch('/nutritionist/patients');
+export const apiAssignNutritionistPlan = (patientId, payload) =>
+  apiFetch(`/nutritionist/patients/${encodeURIComponent(patientId)}/plan`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  });
+export const apiTrackAnonymousEvent = (eventName, properties = {}) =>
+  apiFetch('/observability/events', {
+    method: 'POST',
+    body: JSON.stringify({ eventName, properties })
+  });

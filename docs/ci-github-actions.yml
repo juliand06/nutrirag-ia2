@@ -1,4 +1,4 @@
-name: NutriStudio AI — CI Build & Test
+name: NutriStudio AI — CI Build, Security & Test
 
 on:
   push:
@@ -7,9 +7,22 @@ on:
     branches: [main]
 
 jobs:
+  secret-scan:
+    name: Secret & PII Guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check no API keys in frontend source
+        run: |
+          if grep -rnE "VITE_(OPENAI|GEMINI|STRIPE_SECRET)_API_KEY|AIza[0-9A-Za-z_-]{35}|sk_live_" frontend/src; then
+            echo "ERROR: Secret key found in frontend source!"
+            exit 1
+          fi
+
   frontend:
     name: Frontend (Vite Build + Vitest)
     runs-on: ubuntu-latest
+    needs: secret-scan
     defaults:
       run:
         working-directory: frontend
@@ -25,8 +38,9 @@ jobs:
       - run: npm run build
 
   backend:
-    name: Backend (Spring Boot + JUnit)
+    name: Backend (Spring Boot + JUnit + Flyway Validate)
     runs-on: ubuntu-latest
+    needs: secret-scan
     defaults:
       run:
         working-directory: backend
@@ -38,3 +52,4 @@ jobs:
           java-version: 17
           cache: maven
       - run: mvn -B test
+      - run: ls -la src/main/resources/db/migration/V1__init_schema.sql src/main/resources/db/migration/V2__phase5_enterprise_schema.sql

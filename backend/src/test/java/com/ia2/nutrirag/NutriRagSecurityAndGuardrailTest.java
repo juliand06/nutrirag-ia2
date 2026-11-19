@@ -1,6 +1,7 @@
 package com.ia2.nutrirag;
 
 import com.ia2.nutrirag.service.NutritionGuardrailService;
+import com.ia2.nutrirag.service.SensitiveDataCryptoService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -8,7 +9,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -24,6 +27,9 @@ class NutriRagSecurityAndGuardrailTest {
 
     @Autowired
     private NutritionGuardrailService guardrailService;
+
+    @Autowired
+    private SensitiveDataCryptoService cryptoService;
 
     @Test
     void healthEndpointIsPublic() throws Exception {
@@ -61,5 +67,29 @@ class NutriRagSecurityAndGuardrailTest {
     void hybridGuardrailAllowsNutritionAndBlocksOffTopic() {
         assertTrue(guardrailService.evaluateQuery("¿Cuántas calorías y proteínas tiene la pechuga de pollo?").allowed());
         assertFalse(guardrailService.evaluateQuery("¿Cómo corrijo un NullPointerException en javascript?").allowed());
+    }
+
+    @Test
+    void sensitiveDataAesGcmRoundTripWorks() {
+        String note = "Nota clínica SOAP: Glucosa ayunas 94 mg/dL, buena tolerancia a fibra.";
+        String encrypted = cryptoService.encrypt(note);
+        assertTrue(encrypted.startsWith("v1:"));
+        assertNotEquals(note, encrypted);
+        assertEquals(note, cryptoService.decrypt(encrypted));
+    }
+
+    @Test
+    void fhirSandboxRejectsWithoutExplicitConsentAndProtectsBilling() throws Exception {
+        mockMvc.perform(post("/api/platform/fhir/sandbox-connect")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"patientFhirId\":\"example\",\"consentGranted\":false}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.isRealFhirData").value(false));
+
+        mockMvc.perform(get("/api/billing/subscription"))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/nutritionist/patients"))
+                .andExpect(status().isForbidden());
     }
 }
