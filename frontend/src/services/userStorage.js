@@ -91,7 +91,21 @@ export function authenticateUser(email, password) {
   return found;
 }
 
-export function registerNewUser({ name, email, password }) {
+export function registerNewUser({
+  name,
+  email,
+  password,
+  country = 'CO',
+  budgetTier = 'equilibrado',
+  sex = 'no_especificado',
+  age = 0,
+  weightKg = 0,
+  heightCm = 0,
+  activityLevel = 'moderado',
+  metabolismType = 'equilibrado',
+  goal = 'mantenimiento',
+  medicalConditions = []
+}) {
   const cleanName = (name || '').trim();
   const cleanEmail = (email || '').trim().toLowerCase();
 
@@ -110,36 +124,65 @@ export function registerNewUser({ name, email, password }) {
     throw new Error('Ya existe una cuenta registrada con este correo.');
   }
 
-  // Todo usuario nuevo inicia con sus indicadores y metas en 0 hasta que los registre
+  const w = Math.max(0, Number(weightKg) || 0);
+  const h = Math.max(0, Number(heightCm) || 0);
+  const a = Math.max(0, Number(age) || 0);
+
+  const computed =
+    w > 0 && h > 0 && a > 0
+      ? calculateRecommendedTargets({
+          weightKg: w,
+          heightCm: h,
+          age: a,
+          sex,
+          metabolismType,
+          activityLevel,
+          goal
+        })
+      : null;
+
   const newUser = {
     id: 'usr-' + Math.random().toString(36).substring(2, 10),
     name: cleanName,
     email: cleanEmail,
     password,
-    profileConfigured: false,
-    goal: '',
-    weightKg: 0,
-    heightCm: 0,
-    age: 0,
-    sex: 'no_especificado',
-    metabolismType: 'equilibrado',
-    country: 'CO',
-    budgetTier: 'equilibrado',
-    medicalConditions: [],
+    profileConfigured: Boolean(computed),
+    goal: computed ? goal : '',
+    weightKg: w,
+    heightCm: h,
+    age: a,
+    sex,
+    metabolismType,
+    country,
+    budgetTier,
+    medicalConditions: Array.isArray(medicalConditions) ? medicalConditions : [],
     physicalNotes: '',
-    activityLevel: 'moderado',
-    dailyCalories: 0,
-    targetCarbs: 0,
-    targetProtein: 0,
-    targetFat: 0,
-    waterGoalMl: 0,
+    activityLevel,
+    dailyCalories: computed ? computed.dailyCalories : 0,
+    targetCarbs: computed ? computed.targetCarbs : 0,
+    targetProtein: computed ? computed.targetProtein : 0,
+    targetFat: computed ? computed.targetFat : 0,
+    waterGoalMl: computed ? computed.waterGoalMl : 0,
     createdAt: getTodayIso()
   };
 
   const updated = [...users, newUser];
   saveUsers(updated);
   setCurrentSessionUser(newUser.id);
-  getUserWorkspace(newUser);
+  const ws = getUserWorkspace(newUser);
+  if (w > 0 && ws) {
+    saveUserWorkspace(newUser.id, {
+      ...ws,
+      weightHistory: [
+        {
+          id: 'w-init-' + Date.now(),
+          date: getTodayIso(),
+          weightKg: w,
+          note: 'Peso inicial registrado en bienvenida'
+        }
+      ]
+    });
+  }
   return newUser;
 }
 
