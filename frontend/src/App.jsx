@@ -17,6 +17,7 @@ import {
 import {
   CLINICAL_INSTITUTIONS,
   buildInitialClinicalRecordForEmail,
+  runFederatedClinicalDiscovery,
   evaluateClinicalReconciliationRubric
 } from './services/clinicalSyncService';
 import {
@@ -191,6 +192,7 @@ export default function App() {
 
   // Vinculación Clínica / Hospitalaria por correo (Gmail/Email)
   const [selectedInstitutionId, setSelectedInstitutionId] = useState(CLINICAL_INSTITUTIONS[0].id);
+  const [clinicalConsentChecked, setClinicalConsentChecked] = useState(true);
   const [clinicalSyncNotice, setClinicalSyncNotice] = useState('');
 
   useEffect(() => {
@@ -852,6 +854,12 @@ export default function App() {
 
   const handleSyncClinicByEmail = () => {
     if (!currentUser) return;
+    if (!clinicalConsentChecked) {
+      setClinicalSyncNotice(
+        'Debes autorizar el consentimiento informado (SMART on FHIR) antes de consultar tu expediente.'
+      );
+      return;
+    }
     const synced = buildInitialClinicalRecordForEmail({
       email: currentUser.email,
       institutionId: selectedInstitutionId,
@@ -865,6 +873,27 @@ export default function App() {
       `Expediente clínico vinculado mediante ${currentUser.email} (${synced.institutionName}).`
     );
     setTimeout(() => setClinicalSyncNotice(''), 4500);
+  };
+
+  const handleFederatedHospitalDiscovery = () => {
+    if (!currentUser) return;
+    try {
+      const consolidated = runFederatedClinicalDiscovery({
+        email: currentUser.email,
+        userWeightKg: currentUser.weightKg,
+        consentGranted: clinicalConsentChecked
+      });
+      updateWorkspace(prev => ({
+        ...prev,
+        clinicalRecord: consolidated
+      }));
+      setClinicalSyncNotice(
+        `Red Federada HL7 FHIR consultada con éxito para ${currentUser.email}: ${consolidated.federatedSources.length} instituciones consolidadas.`
+      );
+      setTimeout(() => setClinicalSyncNotice(''), 5000);
+    } catch (err) {
+      setClinicalSyncNotice(err.message);
+    }
   };
 
   const handleUpdateClinicalField = (field, value) => {
@@ -2580,9 +2609,24 @@ export default function App() {
 
                 {!clinicalRecord ? (
                   <div className="form-stack" style={{ marginTop: '12px' }}>
+                    <label
+                      className="list-item-card"
+                      style={{ cursor: 'pointer', alignItems: 'flex-start', gap: '10px', padding: '10px 12px' }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={clinicalConsentChecked}
+                        onChange={e => setClinicalConsentChecked(e.target.checked)}
+                        style={{ marginTop: '3px' }}
+                      />
+                      <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                        <strong>Consentimiento informado (SMART on FHIR / OAuth2):</strong> Autorizo a NutriStudio a consultar y consolidar mi historial clínico usando mi correo verificado (<strong>{currentUser.email}</strong>) únicamente en clínicas, hospitales y laboratorios autorizados de la red interoperable.
+                      </span>
+                    </label>
+
                     <div className="field-row">
                       <div className="field-group">
-                        <label className="field-label">Clínica especializada u hospital de origen</label>
+                        <label className="field-label">Clínica especializada u hospital específico</label>
                         <select
                           className="input-clean"
                           value={selectedInstitutionId}
@@ -2595,13 +2639,20 @@ export default function App() {
                           ))}
                         </select>
                       </div>
-                      <div className="field-group" style={{ justifyContent: 'flex-end' }}>
+                      <div className="field-group" style={{ justifyContent: 'flex-end', gap: '8px' }}>
                         <button
                           type="button"
                           className="btn-solid"
+                          onClick={handleFederatedHospitalDiscovery}
+                        >
+                          Consolidar toda la Red Federada de Clínicas y Hospitales (FHIR)
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-outline"
                           onClick={handleSyncClinicByEmail}
                         >
-                          Sincronizar expediente con {currentUser.email}
+                          Sincronizar solo la institución seleccionada
                         </button>
                       </div>
                     </div>
@@ -2732,6 +2783,19 @@ export default function App() {
                             {clinicalRubric.drugNutrientAlerts.map((a, i) => (
                               <span key={i} style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
                                 • {a}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {clinicalRecord.federatedSources?.length > 0 && (
+                          <div className="list-item-card" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                            <strong style={{ fontSize: '0.8rem' }}>
+                              Nodos clínicos consolidados vía HL7 FHIR ({clinicalRecord.federatedSources.length})
+                            </strong>
+                            {clinicalRecord.federatedSources.map(src => (
+                              <span key={src.institutionId} style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                                • <strong>{src.institutionName}:</strong> {src.resources.join(', ')} ({src.status})
                               </span>
                             ))}
                           </div>

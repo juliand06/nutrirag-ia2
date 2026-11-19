@@ -245,3 +245,19 @@ ON patient_clinical_records (LOWER(patient_email));
 
 CREATE INDEX IF NOT EXISTS idx_clinical_reconciliation_user
 ON clinical_reconciliation_rubric (user_id, reconciled_at DESC);
+
+
+-- Auditoría de consultas federadas (HIE / SMART on FHIR R4) con consentimiento del paciente
+CREATE TABLE IF NOT EXISTS federated_hie_sync_logs (
+    sync_id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(64) NOT NULL REFERENCES users_biometric_profiles(user_id) ON DELETE CASCADE,
+    institution_id VARCHAR(64) NOT NULL REFERENCES clinical_institutions(institution_id) ON DELETE CASCADE,
+    patient_email VARCHAR(160) NOT NULL,
+    consent_verified BOOLEAN NOT NULL DEFAULT TRUE,
+    fhir_resources_fetched VARCHAR(255) NOT NULL, -- Patient,Observation,Condition,MedicationRequest,AllergyIntolerance
+    sync_status VARCHAR(32) NOT NULL DEFAULT 'CONSOLIDATED',
+    synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_federated_hie_user
+ON federated_hie_sync_logs (user_id, synced_at DESC);
