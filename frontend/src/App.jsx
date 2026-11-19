@@ -1480,68 +1480,149 @@ export default function App() {
               </div>
             )}
 
-            {/* Tarjetas de progreso calórico y de macronutrientes del día */}
-            <div className="stats-row">
-              <div className="stat-box">
-                <div className="stat-label">Calorías hoy</div>
-                <div className="stat-value">
-                  {consumedKcal}{' '}
-                  <span style={{ fontSize: '0.85rem', fontWeight: 400, color: 'var(--text-muted)' }}>
-                    / {goalKcal} kcal
-                  </span>
-                </div>
-                <div className="progress-track">
-                  <div className="progress-fill" style={{ width: `${pctKcal}%` }} />
-                </div>
-                <div className="stat-sub">
-                  {goalKcal > 0
-                    ? `${Math.max(0, goalKcal - consumedKcal)} kcal restantes hoy`
-                    : 'Meta en 0 kcal'}
-                </div>
-              </div>
+            {/* ANILLO DE CALORÍAS (MYFITNESSPAL / LIFESUM) + MACROS DE COLOR + HIDRATACIÓN VISUAL */}
+            {(() => {
+              const radius = 64;
+              const circumference = 2 * Math.PI * radius;
+              const strokeOffset = circumference * (1 - Math.min(100, pctKcal) / 100);
+              const remainingToday = Math.max(0, goalKcal - consumedKcal);
+              const filledGlasses = Math.min(8, Math.floor(waterTodayMl / 250));
 
-              <div className="stat-box">
-                <div className="stat-label">Carbohidratos</div>
-                <div className="stat-value">
-                  {consumedCarbs}g{' '}
-                  <span style={{ fontSize: '0.85rem', fontWeight: 400, color: 'var(--text-muted)' }}>
-                    / {goalCarbs}g
-                  </span>
-                </div>
-                <div className="progress-track">
-                  <div className="progress-fill" style={{ width: `${pctCarbs}%` }} />
-                </div>
-                <div className="stat-sub">{pctCarbs}% completado</div>
-              </div>
+              return (
+                <div className="dashboard-ring-grid">
+                  <div className="calorie-ring-card">
+                    <div className="ring-wrapper">
+                      <svg className="ring-svg" viewBox="0 0 156 156">
+                        <defs>
+                          <linearGradient id="nutriRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stopColor="#0f6b56" />
+                            <stop offset="100%" stopColor="#14b8a6" />
+                          </linearGradient>
+                        </defs>
+                        <circle
+                          cx="78"
+                          cy="78"
+                          r={radius}
+                          fill="none"
+                          stroke="#eaf0ee"
+                          strokeWidth="12"
+                        />
+                        <circle
+                          cx="78"
+                          cy="78"
+                          r={radius}
+                          fill="none"
+                          stroke="url(#nutriRingGrad)"
+                          strokeWidth="12"
+                          strokeLinecap="round"
+                          strokeDasharray={circumference}
+                          strokeDashoffset={strokeOffset}
+                          style={{ transition: 'stroke-dashoffset 0.4s ease' }}
+                        />
+                      </svg>
+                      <div className="ring-center">
+                        <span className="ring-kcal-big">
+                          {goalKcal > 0 ? remainingToday.toLocaleString() : consumedKcal}
+                        </span>
+                        <span className="ring-kcal-label">
+                          {goalKcal > 0 ? 'kcal restantes' : 'kcal hoy'}
+                        </span>
+                        <span style={{ fontSize: '0.68rem', color: 'var(--accent)', fontWeight: 600, marginTop: '2px' }}>
+                          {consumedKcal} / {goalKcal}
+                        </span>
+                      </div>
+                    </div>
 
-              <div className="stat-box">
-                <div className="stat-label">Proteínas</div>
-                <div className="stat-value">
-                  {consumedProtein}g{' '}
-                  <span style={{ fontSize: '0.85rem', fontWeight: 400, color: 'var(--text-muted)' }}>
-                    / {goalProtein}g
-                  </span>
-                </div>
-                <div className="progress-track">
-                  <div className="progress-fill" style={{ width: `${pctProtein}%` }} />
-                </div>
-                <div className="stat-sub">{pctProtein}% completado</div>
-              </div>
+                    <div className="macro-bars-stack">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                        <strong style={{ fontSize: '0.88rem' }}>Macronutrientes hoy</strong>
+                        <span className="streak-pill">Racha: {aiProgress.streakDays}d · {aiProgress.consistencyPct}%</span>
+                      </div>
 
-              <div className="stat-box">
-                <div className="stat-label">Grasas saludables</div>
-                <div className="stat-value">
-                  {consumedFat}g{' '}
-                  <span style={{ fontSize: '0.85rem', fontWeight: 400, color: 'var(--text-muted)' }}>
-                    / {goalFat}g
-                  </span>
+                      <div className="macro-bar-row">
+                        <div className="macro-bar-head">
+                          <span>Carbohidratos</span>
+                          <strong>{consumedCarbs}g / {goalCarbs}g</strong>
+                        </div>
+                        <div className="macro-track">
+                          <div className="macro-fill-carbs" style={{ width: `${pctCarbs}%` }} />
+                        </div>
+                      </div>
+
+                      <div className="macro-bar-row">
+                        <div className="macro-bar-head">
+                          <span>Proteínas</span>
+                          <strong>{consumedProtein}g / {goalProtein}g</strong>
+                        </div>
+                        <div className="macro-track">
+                          <div className="macro-fill-protein" style={{ width: `${pctProtein}%` }} />
+                        </div>
+                      </div>
+
+                      <div className="macro-bar-row">
+                        <div className="macro-bar-head">
+                          <span>Grasas saludables</span>
+                          <strong>{consumedFat}g / {goalFat}g</strong>
+                        </div>
+                        <div className="macro-track">
+                          <div className="macro-fill-fat" style={{ width: `${pctFat}%` }} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="hydration-visual-card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                      <div>
+                        <strong style={{ fontSize: '0.9rem' }}>Hidratación visual (vasos de 250 ml)</strong>
+                        <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                          {waterTodayMl} ml / {goalWater || 2000} ml · Toca un vaso para registrar
+                        </div>
+                      </div>
+                      <span className="tag-pill">{filledGlasses} / 8 vasos</span>
+                    </div>
+
+                    <div className="water-drops-grid">
+                      {Array.from({ length: 8 }).map((_, idx) => {
+                        const isFilled = idx < filledGlasses;
+                        return (
+                          <button
+                            key={idx}
+                            type="button"
+                            className={`water-drop-btn ${isFilled ? 'filled' : ''}`}
+                            title={`${(idx + 1) * 250} ml`}
+                            onClick={() => {
+                              const targetMl = (idx + 1) * 250;
+                              const delta = targetMl === waterTodayMl ? -250 : targetMl - waterTodayMl;
+                              handleAdjustWater(delta);
+                            }}
+                          >
+                            💧
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                        <strong>{mealsToday.length}</strong> plato(s) hoy · País: <strong>{processCoach.country.name}</strong>
+                      </span>
+                      <button
+                        type="button"
+                        className="btn-solid"
+                        style={{ padding: '7px 12px', fontSize: '0.78rem' }}
+                        onClick={() => {
+                          setMealEntryMode('database');
+                          setActiveSection('meals');
+                        }}
+                      >
+                        + Buscar alimento (Yuka/Macros)
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <div className="progress-track">
-                  <div className="progress-fill" style={{ width: `${pctFat}%` }} />
-                </div>
-                <div className="stat-sub">{pctFat}% completado</div>
-              </div>
-            </div>
+              );
+            })()}
 
             {/* SUB-TABS COMPACTAS PARA MANTENER EL PANEL ROBUSTO Y SIN SCROLL EXCESIVO */}
             <div className="subtab-bar">
@@ -2012,6 +2093,58 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+
+                {/* DIARIO VISUAL POR TIEMPOS DE COMIDA (MYFITNESSPAL / FITIA / YAZIO) */}
+                <div className="meal-slots-grid">
+                  {[
+                    { slot: 'Desayuno', icon: '☀️', hint: 'Energía y proteína inicial' },
+                    { slot: 'Almuerzo', icon: '🥗', hint: 'Comida principal balanceada' },
+                    { slot: 'Merienda', icon: '🍎', hint: 'Snack saciante / fibra' },
+                    { slot: 'Cena', icon: '🌙', hint: 'Proteína ligera nocturna' }
+                  ].map(({ slot, icon, hint }) => {
+                    const slotMeals = mealsToday.filter(m =>
+                      (m.mealType || '').toLowerCase().includes(slot.toLowerCase())
+                    );
+                    const slotKcal = slotMeals.reduce((acc, m) => acc + (Number(m.totalCalories) || 0), 0);
+                    return (
+                      <div key={slot} className="meal-slot-card">
+                        <div className="meal-slot-head">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div className="meal-slot-badge">{icon}</div>
+                            <div>
+                              <strong style={{ fontSize: '0.88rem' }}>{slot}</strong>
+                              <div style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>
+                                {slotMeals.length > 0 ? `${slotKcal} kcal · ${slotMeals.length} plato(s)` : hint}
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="meal-slot-add-btn"
+                            title={`Agregar a ${slot}`}
+                            onClick={() => {
+                              setMealType(slot === 'Merienda' ? 'Merienda' : slot);
+                              setMealEntryMode('database');
+                              setActiveSection('meals');
+                            }}
+                          >
+                            +
+                          </button>
+                        </div>
+                        {slotMeals.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingTop: '4px', borderTop: '1px solid var(--border)' }}>
+                            {slotMeals.map(m => (
+                              <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.77rem' }}>
+                                <span style={{ color: 'var(--text-secondary)' }}>{m.dishName}</span>
+                                <strong>{m.totalCalories} kcal</strong>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
             <div className="split-grid">
               <div className="card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
@@ -2280,14 +2413,7 @@ export default function App() {
                                     {food.clinicalTag} · NOVA {food.novaGroup} · IG {food.glycemicIndex}
                                   </div>
                                 </div>
-                                <span
-                                  className="tag-pill"
-                                  style={
-                                    isWarning
-                                      ? { background: 'var(--danger-soft)', color: 'var(--danger-text)' }
-                                      : undefined
-                                  }
-                                >
+                                <span className={`nutri-badge nutri-grade-${food.nutriGrade}`}>
                                   Nutri-Score {food.nutriGrade} · {food.qualityScore}/100
                                 </span>
                               </div>
