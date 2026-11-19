@@ -7,7 +7,12 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['nutristudio-logo.svg', 'hero-nutrition.jpg', 'landing-meal-scan.jpg', 'landing-wellness.jpg'],
+      includeAssets: [
+        'nutristudio-logo.svg',
+        'hero-nutrition.webp',
+        'landing-meal-scan.webp',
+        'landing-wellness.webp'
+      ],
       manifest: {
         name: 'NutriStudio AI — Nutrición y Bienestar',
         short_name: 'NutriStudio',
@@ -27,6 +32,17 @@ export default defineConfig({
       }
     })
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom', 'zustand'],
+          'motion-i18n': ['framer-motion', 'i18next', 'react-i18next'],
+          charts: ['recharts']
+        }
+      }
+    }
+  },
   server: {
     port: 5173
   },

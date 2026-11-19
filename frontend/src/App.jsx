@@ -1,6 +1,9 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { useNutriStore } from './store/useNutriStore';
+import { formatWeight } from './i18n';
+import { Skeleton, Toast } from './design-system';
 import {
   apiLogin,
   apiRegister,
@@ -73,10 +76,12 @@ import CalorieRing from './components/CalorieRing';
 import WaterGlasses from './components/WaterGlasses';
 import RetentionHubSection from './components/RetentionHubSection';
 import WeeklyPlannerAndRecipes from './components/WeeklyPlannerAndRecipes';
+import MobileBottomNav from './components/MobileBottomNav';
 import { saveWorkspaceToIndexedDb } from './services/retentionEngine';
 import { searchOpenFoodFactsCatalog } from './services/openFoodFactsService';
 
 const BarcodeScannerPanel = lazy(() => import('./components/BarcodeScannerPanel'));
+const NutritionChartsPanel = lazy(() => import('./components/NutritionChartsPanel'));
 
 export default function App() {
   // SEGURIDAD: Ninguna clave de API se expone en el navegador; el backend proxy maneja las llamadas LLM si está activo.
@@ -88,8 +93,14 @@ export default function App() {
   const location = useLocation();
   const themeMode = useNutriStore(s => s.themeMode);
   const toggleThemeMode = useNutriStore(s => s.toggleThemeMode);
+  const unitSystem = useNutriStore(s => s.unitSystem);
   const copilotOpen = useNutriStore(s => s.copilotOpen);
   const setCopilotOpen = useNutriStore(s => s.setCopilotOpen);
+  const quickAddOpen = useNutriStore(s => s.quickAddOpen);
+  const setQuickAddOpen = useNutriStore(s => s.setQuickAddOpen);
+  const toast = useNutriStore(s => s.toast);
+  const showToast = useNutriStore(s => s.showToast);
+  const clearToast = useNutriStore(s => s.clearToast);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', themeMode);
@@ -1331,7 +1342,7 @@ export default function App() {
               <div>
                 <h1 className="page-title">Hola, {currentUser.name.split(' ')[0]}</h1>
                 <p className="page-subtitle">
-                  {currentGoalLabel} · Peso actual: {currentUser.weightKg || 0} kg · Meta diaria: {goalKcal} kcal
+                  {currentGoalLabel} · Peso actual: {formatWeight(currentUser.weightKg || 0, unitSystem)} · Meta diaria: {goalKcal} kcal
                 </p>
               </div>
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -1444,8 +1455,13 @@ export default function App() {
               </div>
             )}
 
-            {/* ANILLO DE CALORÍAS + MACROS DE COLOR + HIDRATACIÓN VISUAL (COMPONENTES MODULARES) */}
-            <div className="dashboard-ring-grid">
+            {/* ANILLO DE CALORÍAS + MACROS DE COLOR + HIDRATACIÓN VISUAL (ANIMADO) */}
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.28 }}
+              className="dashboard-ring-grid"
+            >
               <CalorieRing
                 goalKcal={goalKcal}
                 consumedKcal={consumedKcal}
@@ -1475,17 +1491,17 @@ export default function App() {
                 fastingState={workspace.fastingState}
                 onToggleFasting={handleToggleFastingWindow}
               />
-            </div>
+            </motion.div>
 
-            {/* TARJETAS DE INSIGHTS PROACTIVOS (FASE 3) */}
+            {/* INSIGHT DESTACADO DEL DÍA (PROACTIVO) */}
             {proactiveInsights.length > 0 && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px', marginBottom: '16px' }}>
                 {proactiveInsights.map(ins => (
                   <div
                     key={ins.title}
-                    className="list-item-card"
+                    className="list-item-card ds-card-warm"
                     style={{
-                      borderLeft: `4px solid ${ins.type === 'warning' ? 'var(--danger-text)' : 'var(--accent)'}`,
+                      borderLeft: `4px solid ${ins.type === 'warning' ? 'var(--danger-text)' : 'var(--warm-accent)'}`,
                       alignItems: 'flex-start',
                       gap: '10px'
                     }}
@@ -2090,6 +2106,9 @@ export default function App() {
                 )}
               </div>
             </div>
+            <Suspense fallback={<Skeleton height="240px" style={{ marginTop: '18px' }} />}>
+              <NutritionChartsPanel workspace={workspace} userProfile={currentUser} />
+            </Suspense>
               </div>
               );
             })()}
@@ -2176,7 +2195,7 @@ export default function App() {
                 </div>
 
                 {mealEntryMode === 'barcode' ? (
-                  <Suspense fallback={<div style={{ padding: '16px', fontSize: '0.84rem' }}>Cargando escáner de código de barras…</div>}>
+                  <Suspense fallback={<Skeleton height="180px" />}>
                     <BarcodeScannerPanel
                       mealType={mealType}
                       onAddBarcodeMeal={(entry) => {
@@ -3123,6 +3142,9 @@ export default function App() {
               }))
             }
           />
+          <Suspense fallback={<Skeleton height="240px" style={{ marginTop: '18px' }} />}>
+            <NutritionChartsPanel workspace={workspace} userProfile={currentUser} />
+          </Suspense>
           </>
         )}
 
@@ -3481,6 +3503,32 @@ export default function App() {
         onAsk={handleCopilotAsk}
         onNavigate={setActiveSection}
       />
+
+      <MobileBottomNav
+        activeSection={activeSection}
+        onSelectSection={setActiveSection}
+        quickAddOpen={quickAddOpen}
+        setQuickAddOpen={setQuickAddOpen}
+        onQuickFoodSearch={() => {
+          setMealEntryMode('database');
+          setActiveSection('meals');
+        }}
+        onQuickPhotoScan={() => {
+          setMealEntryMode('photo');
+          setActiveSection('meals');
+        }}
+        onQuickBarcodeScan={() => {
+          setMealEntryMode('barcode');
+          setActiveSection('meals');
+        }}
+        onQuickAddWater={() => {
+          handleAdjustWater(250);
+          showToast('💧 +250 ml sumados a tu hidratación de hoy');
+          setTimeout(() => clearToast(), 2800);
+        }}
+      />
+
+      <Toast message={toast?.message} tone={toast?.tone} onDismiss={clearToast} />
     </div>
   );
 }

@@ -11,9 +11,13 @@
   },
   "dependencies": {
     "@zxing/browser": "^0.2.1",
+    "framer-motion": "^14.14.0",
+    "i18next": "^27.2.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-i18next": "^18.0.3",
     "react-router-dom": "^7.18.6",
+    "recharts": "^3.11.0",
     "zustand": "^5.1.0"
   },
   "devDependencies": {
@@ -21,6 +25,7 @@
     "@testing-library/react": "^16.3.3",
     "@vitejs/plugin-react": "^4.3.2",
     "jsdom": "^25.0.1",
+    "sharp": "^0.35.5",
     "vite": "^5.4.8",
     "vite-plugin-pwa": "^0.21.2",
     "vitest": "^2.1.9"

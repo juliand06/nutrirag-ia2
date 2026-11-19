@@ -1,6 +1,9 @@
 import React from 'react';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import '../i18n';
+import { formatWeight, formatHeight } from '../i18n';
+import { Button, Card, Chip, Toast, Skeleton } from '../design-system';
 import HealthDisclaimer from '../components/HealthDisclaimer';
 import LandingPage from '../components/LandingPage';
 import { registerNewUser, authenticateUser, loadUsers } from '../services/userStorage';
@@ -11,7 +14,7 @@ import { computeGamificationState, computeWellnessCorrelations } from '../servic
 import { evaluateClinicalSafety } from '../services/clinicalSafetyGuard';
 import { runRagEvaluationBenchmark } from '../services/ragEvaluationDataset';
 
-describe('NutriStudio AI — Fase 1 Seguridad, Datos y UI', () => {
+describe('NutriStudio AI — Fases 1-4 Suite Completa', () => {
   beforeEach(() => {
     localStorage.clear();
   });
@@ -63,7 +66,7 @@ describe('NutriStudio AI — Fase 1 Seguridad, Datos y UI', () => {
     expect(valid.allowed).toBe(true);
   });
 
-  it('renderiza HealthDisclaimer y LandingPage con aviso sanitario obligatorio', () => {
+  it('renderiza LandingPage de conversión con demo, testimonios, precios, FAQ y aviso sanitario', () => {
     render(<HealthDisclaimer />);
     expect(
       screen.getByText(/Orientación informativa; no reemplaza a un profesional/i)
@@ -71,6 +74,9 @@ describe('NutriStudio AI — Fase 1 Seguridad, Datos y UI', () => {
 
     render(<LandingPage onOpenLogin={() => {}} onOpenRegister={() => {}} />);
     expect(screen.getByText(/Nutre tu cuerpo con/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Plan Free$/i)).toBeInTheDocument();
+    expect(screen.getByText(/Plan Pro Clínico/i)).toBeInTheDocument();
+    expect(screen.getByText(/Preguntas frecuentes/i)).toBeInTheDocument();
   });
 
   it('importa archivos CSV estilo MyFitnessPal/Google Fit y calcula correlaciones + gamificación', () => {
@@ -108,5 +114,23 @@ describe('NutriStudio AI — Fase 1 Seguridad, Datos y UI', () => {
     expect(bench.totalQuestions).toBe(50);
     expect(bench.recallAtK).toBeGreaterThanOrEqual(0.7);
     expect(bench.mrr).toBeGreaterThanOrEqual(0.6);
+  });
+
+  it('convierte unidades métricas/imperiales y renderiza componentes del Design System', () => {
+    expect(formatWeight(70, 'metric')).toBe('70 kg');
+    expect(formatWeight(70, 'imperial')).toBe('154.3 lb');
+    expect(formatHeight(175, 'metric')).toBe('175 cm');
+    expect(formatHeight(175, 'imperial')).toBe("5'9\"");
+
+    render(
+      <Card warm>
+        <Button variant="warm">Acción</Button>
+        <Chip active tone="warm">Activo</Chip>
+        <Toast message="Guardado" />
+        <Skeleton />
+      </Card>
+    );
+    expect(screen.getByText('Acción')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Guardado');
   });
 });

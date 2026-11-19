@@ -1,4 +1,6 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
+import { useNutriStore } from '../store/useNutriStore';
 
 export default function SidebarNav({
   activeSection,
@@ -13,6 +15,12 @@ export default function SidebarNav({
   onToggleTheme,
   onLogout
 }) {
+  const { t } = useTranslation();
+  const language = useNutriStore(s => s.language);
+  const setLanguage = useNutriStore(s => s.setLanguage);
+  const unitSystem = useNutriStore(s => s.unitSystem);
+  const toggleUnitSystem = useNutriStore(s => s.toggleUnitSystem);
+
   return (
     <aside className="sidebar" aria-label="Menú lateral">
       <div>
@@ -22,7 +30,7 @@ export default function SidebarNav({
             alt="Logo NutriStudio AI"
             style={{ width: '34px', height: '34px', borderRadius: '9px' }}
           />
-          <span className="auth-brand-name">NutriStudio AI</span>
+          <span className="auth-brand-name">{t('brand')}</span>
         </div>
 
         <nav className="sidebar-nav" aria-label="Navegación principal">
@@ -33,7 +41,7 @@ export default function SidebarNav({
             onClick={() => onSelectSection('summary')}
           >
             <span className="sidebar-link-label">
-              <span aria-hidden="true">📊</span> Seguimiento diario
+              <span aria-hidden="true">📊</span> {t('nav.summary')}
             </span>
           </button>
           <button
@@ -43,7 +51,7 @@ export default function SidebarNav({
             onClick={() => onSelectSection('meals')}
           >
             <span className="sidebar-link-label">
-              <span aria-hidden="true">🥗</span> Comidas
+              <span aria-hidden="true">🥗</span> {t('nav.meals')}
             </span>
             <span className="sidebar-count">{mealLogsCount}</span>
           </button>
@@ -54,7 +62,7 @@ export default function SidebarNav({
             onClick={() => onSelectSection('chat')}
           >
             <span className="sidebar-link-label">
-              <span aria-hidden="true">💬</span> Asistente Nutricional
+              <span aria-hidden="true">💬</span> {t('nav.chat')}
             </span>
             <span className="sidebar-count">{conversationsCount}</span>
           </button>
@@ -65,7 +73,7 @@ export default function SidebarNav({
             onClick={() => onSelectSection('documents')}
           >
             <span className="sidebar-link-label">
-              <span aria-hidden="true">📄</span> Mis planes y guías
+              <span aria-hidden="true">📄</span> {t('nav.documents')}
             </span>
             <span className="sidebar-count">{documentsCount}</span>
           </button>
@@ -76,7 +84,7 @@ export default function SidebarNav({
             onClick={() => onSelectSection('analytics')}
           >
             <span className="sidebar-link-label">
-              <span aria-hidden="true">🩺</span> Mi Salud y Progreso
+              <span aria-hidden="true">🩺</span> {t('nav.analytics')}
             </span>
             <span className="sidebar-count">{knowledgeScore}%</span>
           </button>
@@ -87,7 +95,7 @@ export default function SidebarNav({
             onClick={() => onSelectSection('profile')}
           >
             <span className="sidebar-link-label">
-              <span aria-hidden="true">⚙️</span> Mi cuenta y metas
+              <span aria-hidden="true">⚙️</span> {t('nav.profile')}
             </span>
           </button>
         </nav>
@@ -104,11 +112,31 @@ export default function SidebarNav({
           </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+            <button
+              type="button"
+              className="btn-outline"
+              style={{ padding: '7px 8px', fontSize: '0.74rem' }}
+              aria-label="Cambiar idioma"
+              onClick={() => setLanguage(language === 'es' ? 'en' : 'es')}
+            >
+              🌐 {language.toUpperCase()}
+            </button>
+            <button
+              type="button"
+              className="btn-outline"
+              style={{ padding: '7px 8px', fontSize: '0.74rem' }}
+              aria-label="Cambiar sistema de unidades"
+              onClick={toggleUnitSystem}
+            >
+              ⚖️ {unitSystem === 'metric' ? 'kg/cm' : 'lb/ft'}
+            </button>
+          </div>
           <button type="button" className="btn-outline" onClick={onToggleTheme}>
-            {themeMode === 'dark' ? '☀️ Modo claro' : '🌙 Modo oscuro clínico'}
+            {themeMode === 'dark' ? `☀️ ${t('nav.lightMode')}` : `🌙 ${t('nav.darkMode')}`}
           </button>
           <button type="button" className="btn-outline" onClick={onLogout}>
-            Cerrar sesión
+            {t('nav.logout')}
           </button>
         </div>
       </div>
