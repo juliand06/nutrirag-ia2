@@ -407,3 +407,56 @@ export function openPrintableClinicalReport({
     w.document.close();
   }
 }
+
+
+/**
+ * Insights proactivos para el dashboard (Fase 3):
+ * analiza micronutrientes (hierro, fibra, sodio), hidratación y constancia proteica
+ * generando tarjetas cortas y accionables para el usuario.
+ */
+export function computeProactiveDashboardInsights({ workspace, userProfile, waterTodayMl, goalWater }) {
+  const meals = workspace?.mealLogs || [];
+  const insights = [];
+
+  if (meals.length >= 3) {
+    const recent = meals.slice(0, 10);
+    const avgIron = recent.reduce((a, m) => a + (Number(m.ironMg) || 0), 0) / recent.length;
+    if (avgIron < 2.5) {
+      insights.push({
+        type: 'info',
+        icon: '🩸',
+        title: 'Refuerza tu hierro esta semana',
+        detail: 'Tu ingesta estimada de hierro ha sido baja en tus últimos platos. Combina lentejas, frijol o carne magra con guayaba o limón.'
+      });
+    }
+    const avgFiber = recent.reduce((a, m) => a + (Number(m.fiberGrams) || 0), 0) / recent.length;
+    if (avgFiber < 5) {
+      insights.push({
+        type: 'info',
+        icon: '🥦',
+        title: 'Oportunidad de más fibra',
+        detail: 'Añadir vegetales verdes o avena integral mejora tu saciedad y estabilidad de energía.'
+      });
+    }
+  }
+
+  if ((goalWater || 2000) > 0 && waterTodayMl >= (goalWater || 2000) * 0.85) {
+    insights.push({
+      type: 'good',
+      icon: '💧',
+      title: '¡Excelente hidratación hoy!',
+      detail: `Llevas ${waterTodayMl} ml registrados. Mantenerte hidratado optimiza tu metabolismo y concentración.`
+    });
+  }
+
+  if (Number(userProfile?.dailyCalories || 0) > 0 && Number(userProfile?.dailyCalories) < 1200) {
+    insights.push({
+      type: 'warning',
+      icon: '🛡️',
+      title: 'Meta calórica por debajo del mínimo seguro',
+      detail: 'Por seguridad clínica se recomienda nunca bajar de 1.200 kcal/día sin supervisión médica directa.'
+    });
+  }
+
+  return insights.slice(0, 3);
+}

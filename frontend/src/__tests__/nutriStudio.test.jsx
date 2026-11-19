@@ -8,6 +8,8 @@ import { searchFoodDatabase, scaleFoodPortion, generateDailyMenuFromDatabase } f
 import { evaluateNutritionGuardrail } from '../services/nutriRagEngine';
 import { parseNutritionCsvImport } from '../services/openFoodFactsService';
 import { computeGamificationState, computeWellnessCorrelations } from '../services/retentionEngine';
+import { evaluateClinicalSafety } from '../services/clinicalSafetyGuard';
+import { runRagEvaluationBenchmark } from '../services/ragEvaluationDataset';
 
 describe('NutriStudio AI — Fase 1 Seguridad, Datos y UI', () => {
   beforeEach(() => {
@@ -91,5 +93,20 @@ describe('NutriStudio AI — Fase 1 Seguridad, Datos y UI', () => {
       mealLogs: importedMeals
     });
     expect(corrs.some(c => c.includes('Sueño vs. Apetito'))).toBe(true);
+  });
+
+  it('deriva a profesional ante embarazo, diabetes tipo 1, TCA, menores o dietas <1200 kcal', () => {
+    expect(evaluateClinicalSafety('Estoy embarazada y quiero déficit calórico').blocked).toBe(true);
+    expect(evaluateClinicalSafety('Tengo diabetes tipo 1, ¿cuánta insulina me pongo?').blocked).toBe(true);
+    expect(evaluateClinicalSafety('Quiero una dieta de 700 kcal al día').blocked).toBe(true);
+    expect(evaluateClinicalSafety('Quiero adelgazar rápido', { age: 15 }).blocked).toBe(true);
+    expect(evaluateClinicalSafety('¿Cuánta proteína tiene el salmón?', { age: 28 }).blocked).toBe(false);
+  });
+
+  it('evalúa el RAG con dataset de 50 preguntas y cumple umbral de Recall@3 y MRR', () => {
+    const bench = runRagEvaluationBenchmark(3);
+    expect(bench.totalQuestions).toBe(50);
+    expect(bench.recallAtK).toBeGreaterThanOrEqual(0.7);
+    expect(bench.mrr).toBeGreaterThanOrEqual(0.6);
   });
 });

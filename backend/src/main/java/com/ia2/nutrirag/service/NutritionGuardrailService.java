@@ -47,6 +47,11 @@ public class NutritionGuardrailService {
             "derivada", "integral", "horoscopo"
     );
 
+    private static final List<String> CLINICAL_REFERRAL_SIGNALS = List.of(
+            "embaraz", "lactancia", "anorexia", "bulimia", "purgar", "vomitar",
+            "diabetes tipo 1", "dm1", "cetoacidosis", "500 kcal", "600 kcal", "800 kcal", "dieta extrema"
+    );
+
     public GuardrailEvaluation evaluateQuery(String rawQuery) {
         if (rawQuery == null || rawQuery.trim().length() < 2) {
             return new GuardrailEvaluation(false,
@@ -54,6 +59,12 @@ public class NutritionGuardrailService {
         }
 
         String normalized = rawQuery.toLowerCase(Locale.ROOT);
+
+        // 0. Seguridad clínica obligatoria: derivar a profesional ante embarazo, TCA, diabetes tipo 1 o dietas < 1200 kcal
+        if (CLINICAL_REFERRAL_SIGNALS.stream().anyMatch(normalized::contains)) {
+            return new GuardrailEvaluation(false,
+                    "Por tu seguridad clínica, casos como embarazo/lactancia, diabetes tipo 1, trastornos alimentarios o dietas extremas (<1.200 kcal) requieren acompañamiento directo de un médico o nutricionista clínico. Nunca recomendamos déficits extremos. *(Orientación informativa; no reemplaza a un profesional).*");
+        }
         boolean hasClearNutrition = CLEAR_NUTRITION_SIGNALS.stream().anyMatch(normalized::contains);
         boolean hasClearOffTopic = CLEAR_OFF_TOPIC_SIGNALS.stream().anyMatch(normalized::contains);
 

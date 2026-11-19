@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useNutriStore } from './store/useNutriStore';
 import {
@@ -43,8 +43,10 @@ import {
   evaluateDailyMealsWithAi,
   buildSmartShoppingList,
   computeAdaptiveTdeeCheckIn,
-  openPrintableClinicalReport
+  openPrintableClinicalReport,
+  computeProactiveDashboardInsights
 } from './services/aiWorkflowEngine';
+import { MIN_SAFE_DAILY_KCAL } from './services/clinicalSafetyGuard';
 import {
   GOAL_OPTIONS,
   getTodayIso,
@@ -69,10 +71,12 @@ import CopilotDrawer from './components/CopilotDrawer';
 import HealthProgressSection from './components/HealthProgressSection';
 import CalorieRing from './components/CalorieRing';
 import WaterGlasses from './components/WaterGlasses';
-import BarcodeScannerPanel from './components/BarcodeScannerPanel';
 import RetentionHubSection from './components/RetentionHubSection';
+import WeeklyPlannerAndRecipes from './components/WeeklyPlannerAndRecipes';
 import { saveWorkspaceToIndexedDb } from './services/retentionEngine';
 import { searchOpenFoodFactsCatalog } from './services/openFoodFactsService';
+
+const BarcodeScannerPanel = lazy(() => import('./components/BarcodeScannerPanel'));
 
 export default function App() {
   // SEGURIDAD: Ninguna clave de API se expone en el navegador; el backend proxy maneja las llamadas LLM si está activo.
@@ -1110,7 +1114,10 @@ export default function App() {
       medicalConditions: profMedicalConditions,
       physicalNotes: profPhysicalNotes.trim(),
       activityLevel: profActivity,
-      dailyCalories: Math.max(0, Number(profCalories) || 0),
+      dailyCalories:
+        Number(profCalories) > 0
+          ? Math.max(MIN_SAFE_DAILY_KCAL, Number(profCalories))
+          : 0,
       targetCarbs: Math.max(0, Number(profCarbs) || 0),
       targetProtein: Math.max(0, Number(profProtein) || 0),
       targetFat: Math.max(0, Number(profFat) || 0),
@@ -1290,6 +1297,12 @@ export default function App() {
     workspace,
     metrics: processCoach.metrics
   });
+  const proactiveInsights = computeProactiveDashboardInsights({
+    workspace,
+    userProfile: currentUser,
+    waterTodayMl,
+    goalWater
+  });
 
   return (
     <div className="workspace-layout">
@@ -1464,6 +1477,31 @@ export default function App() {
               />
             </div>
 
+            {/* TARJETAS DE INSIGHTS PROACTIVOS (FASE 3) */}
+            {proactiveInsights.length > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+                {proactiveInsights.map(ins => (
+                  <div
+                    key={ins.title}
+                    className="list-item-card"
+                    style={{
+                      borderLeft: `4px solid ${ins.type === 'warning' ? 'var(--danger-text)' : 'var(--accent)'}`,
+                      alignItems: 'flex-start',
+                      gap: '10px'
+                    }}
+                  >
+                    <span style={{ fontSize: '1.1rem' }} aria-hidden="true">{ins.icon}</span>
+                    <div>
+                      <strong style={{ fontSize: '0.82rem' }}>{ins.title}</strong>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                        {ins.detail}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* SUB-TABS COMPACTAS PARA MANTENER EL PANEL ROBUSTO Y SIN SCROLL EXCESIVO */}
             <div className="subtab-bar">
               <button
@@ -1496,142 +1534,16 @@ export default function App() {
               </button>
             </div>
 
-            {/* MENÚ AUTOMÁTICO IA (ESTILO EAT THIS MUCH + FITIA + PRODUCTIVIDAD LOCAL) */}
-            {summaryTab === 'menu' && (() => {
-              const activeMenu =
-                generatedMenu ||
-                generateDailyMenuFromDatabase({
-                  targetCalories: goalKcal || 2000,
-                  dietStyle: selectedDietPreset,
-                  countryId: currentUser.country || 'CO'
-                });
-              return (
-                <div className="card" style={{ marginBottom: '20px' }}>
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'flex-end',
-                      gap: '12px',
-                      flexWrap: 'wrap',
-                      marginBottom: '14px'
-                    }}
-                  >
-                    <div>
-                      <span className="tag-pill">
-                        Menú Automático Calibrado · {processCoach.country.name} · Calidad {activeMenu.dayTotals.avgQuality}/100 (Nutri-Score A)
-                      </span>
-                      <div className="card-title" style={{ marginTop: '8px' }}>
-                        Generador de Menú Diario (Eat This Much + Base Clínica)
-                      </div>
-                      <div className="card-desc" style={{ marginBottom: 0 }}>
-                        Total del menú: <strong>{activeMenu.dayTotals.kcal} kcal</strong> · {activeMenu.dayTotals.protein}g proteína · {activeMenu.dayTotals.carbs}g carbs · {activeMenu.dayTotals.fat}g grasas · {activeMenu.dayTotals.fiber}g fibra · {activeMenu.dayTotals.potassiumMg}mg potasio.
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                      <select
-                        className="input-clean"
-                        style={{ width: 'auto' }}
-                        value={selectedDietPreset}
-                        onChange={e => {
-                          const nextStyle = e.target.value;
-                          setSelectedDietPreset(nextStyle);
-                          setGeneratedMenu(
-                            generateDailyMenuFromDatabase({
-                              targetCalories: goalKcal || 2000,
-                              dietStyle: nextStyle,
-                              countryId: currentUser.country || 'CO'
-                            })
-                          );
-                        }}
-                      >
-                        {DIET_PRESETS.map(dp => (
-                          <option key={dp.id} value={dp.id}>
-                            {dp.label}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        className="btn-outline"
-                        onClick={() => setShowShoppingList(prev => !prev)}
-                      >
-                        {showShoppingList ? 'Ocultar lista de mercado' : 'Lista de mercado IA (7 días)'}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-solid"
-                        onClick={() =>
-                          setGeneratedMenu(
-                            generateDailyMenuFromDatabase({
-                              targetCalories: goalKcal || 2000,
-                              dietStyle: selectedDietPreset,
-                              countryId: currentUser.country || 'CO'
-                            })
-                          )
-                        }
-                      >
-                        Recalibrar menú
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="split-grid">
-                    {activeMenu.meals.map(m => (
-                      <div key={m.mealType} className="list-item-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '8px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span className="tag-pill">{m.mealType} · Nutri-Score {m.nutriGrade} ({m.avgQuality}/100)</span>
-                          <strong>{m.kcal} kcal</strong>
-                        </div>
-                        <div style={{ fontSize: '0.84rem', fontWeight: 500 }}>{m.dishName}</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                          P: {m.protein}g · C: {m.carbs}g · G: {m.fat}g · Fibra: {m.fiber}g · Sodio: {m.sodiumMg}mg
-                        </div>
-                        <button
-                          type="button"
-                          className="btn-outline"
-                          style={{ alignSelf: 'flex-start', padding: '6px 10px', fontSize: '0.76rem' }}
-                          onClick={() => handleAddGeneratedMealToDay(m)}
-                        >
-                          + Registrar {m.mealType.toLowerCase()} en mi día
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-
-                  {showShoppingList && (() => {
-                    const shop = buildSmartShoppingList(
-                      activeMenu,
-                      processCoach.country.name,
-                      processCoach.budget.id
-                    );
-                    return (
-                      <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
-                          <strong style={{ fontSize: '0.88rem' }}>
-                            Lista de Mercado Semanal — {shop.countryName} (Presupuesto: {shop.budgetId})
-                          </strong>
-                          <span className="tag-pill">Calculada para tus 7 días</span>
-                        </div>
-                        <div className="split-grid">
-                          {shop.aisles.map(group => (
-                            <div key={group.aisle} className="list-item-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '6px' }}>
-                              <strong style={{ fontSize: '0.8rem', color: 'var(--accent)' }}>{group.aisle}</strong>
-                              {group.items.map(it => (
-                                <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.77rem' }}>
-                                  <span>{it.name} (Nutri-Score {it.nutriGrade})</span>
-                                  <strong>{it.qtyLabel}</strong>
-                                </div>
-                              ))}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-              );
-            })()}
+            {/* PLANIFICADOR SEMANAL CON RESTRICCIONES + RECETAS "LO QUE TENGO EN LA NEVERA" */}
+            {summaryTab === 'menu' && (
+              <WeeklyPlannerAndRecipes
+                goalKcal={goalKcal || 2000}
+                countryId={currentUser.country || 'CO'}
+                countryName={processCoach.country.name}
+                budgetId={processCoach.budget.id}
+                onAddMealToDay={handleAddGeneratedMealToDay}
+              />
+            )}
 
             {/* ACOMPAÑAMIENTO ACTIVO DE LA IA EN EL PROCESO (PAÍS + METABOLISMO + POSIBILIDADES) */}
             {summaryTab === 'process' && (
@@ -2264,23 +2176,25 @@ export default function App() {
                 </div>
 
                 {mealEntryMode === 'barcode' ? (
-                  <BarcodeScannerPanel
-                    mealType={mealType}
-                    onAddBarcodeMeal={(entry) => {
-                      const fullEntry = {
-                        ...entry,
-                        date: todayIso,
-                        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                      };
-                      updateWorkspace(prev => ({
-                        ...prev,
-                        mealLogs: [fullEntry, ...(prev.mealLogs || [])]
-                      }));
-                      apiCreateMeal(fullEntry).catch(() => {});
-                      setMealSavedNotice(`"${entry.dishName}" agregado desde escáner de código de barras.`);
-                      setTimeout(() => setMealSavedNotice(''), 3500);
-                    }}
-                  />
+                  <Suspense fallback={<div style={{ padding: '16px', fontSize: '0.84rem' }}>Cargando escáner de código de barras…</div>}>
+                    <BarcodeScannerPanel
+                      mealType={mealType}
+                      onAddBarcodeMeal={(entry) => {
+                        const fullEntry = {
+                          ...entry,
+                          date: todayIso,
+                          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        };
+                        updateWorkspace(prev => ({
+                          ...prev,
+                          mealLogs: [fullEntry, ...(prev.mealLogs || [])]
+                        }));
+                        apiCreateMeal(fullEntry).catch(() => {});
+                        setMealSavedNotice(`"${entry.dishName}" agregado desde escáner de código de barras.`);
+                        setTimeout(() => setMealSavedNotice(''), 3500);
+                      }}
+                    />
+                  </Suspense>
                 ) : mealEntryMode === 'database' ? (() => {
                   const favIds = workspace.favoriteFoodIds || [];
                   const localMatched = searchFoodDatabase({
@@ -2908,7 +2822,44 @@ export default function App() {
                           className={`bubble ${m.role} ${m.guardrailTriggered ? 'guardrail' : ''}`}
                         >
                           <div>{renderFormattedText(m.text)}</div>
-                          {m.role === 'assistant' && !m.guardrailTriggered && <HealthDisclaimer compact />}
+                          {m.role === 'assistant' && !m.guardrailTriggered && (
+                            <>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
+                                <button
+                                  type="button"
+                                  className="copilot-chip"
+                                  onClick={() => {
+                                    setMealEntryMode('database');
+                                    setActiveSection('meals');
+                                  }}
+                                >
+                                  ➕ Agregar al diario
+                                </button>
+                                <button
+                                  type="button"
+                                  className="copilot-chip"
+                                  onClick={() => {
+                                    setSummaryTab('menu');
+                                    setActiveSection('summary');
+                                  }}
+                                >
+                                  🍳 Crear receta
+                                </button>
+                                <button
+                                  type="button"
+                                  className="copilot-chip"
+                                  onClick={() =>
+                                    handleSendQuestion(
+                                      `Dame una sustitución más saludable o económica en ${processCoach.country.name} para tu recomendación anterior.`
+                                    )
+                                  }
+                                >
+                                  🔄 Sustituir ingrediente
+                                </button>
+                              </div>
+                              <HealthDisclaimer compact />
+                            </>
+                          )}
 
                           {m.citations && m.citations.length > 0 && (
                             <div className="source-list">

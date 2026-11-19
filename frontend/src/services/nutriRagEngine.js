@@ -8,6 +8,7 @@ import {
 } from './countryNutritionData';
 import { GLOBAL_MEDICAL_RAG_DOCUMENTS } from './clinicalKnowledgeBase';
 import { buildPatientClinicalRagDoc } from './clinicalSyncService';
+import { evaluateClinicalSafety } from './clinicalSafetyGuard';
 
 // Gobernanza y Presupuesto de Tokens para uso diario a largo plazo (evita fatiga de contexto y sobrecosto)
 export const TOKEN_GOVERNANCE = {
@@ -426,6 +427,22 @@ export async function runHybridRagQuery(
   tokenBudgetState = null,
   clinicalContext = null
 ) {
+  // 0. Seguridad Clínica Obligatoria (embarazo, TCA, diabetes tipo 1, menores, <1200 kcal)
+  const safety = evaluateClinicalSafety(question, userProfile);
+  if (safety.blocked) {
+    return {
+      guardrailTriggered: true,
+      safetyReferral: true,
+      answer: safety.referralMessage,
+      citations: [],
+      tokenMetrics: {
+        tokensUsed: 0,
+        tokensSaved: 500,
+        mode: 'clinical-safety-guard'
+      }
+    };
+  }
+
   const guardrail = evaluateNutritionGuardrail(question);
   if (!guardrail.allowed) {
     return {
@@ -499,8 +516,8 @@ export async function runHybridRagQuery(
   });
 
   allScored.sort((a, b) => b.hybridScore - a.hybridScore);
-  const topRefs = allScored.slice(0, 2);
-  const userCitations = hasUserDocs ? topRefs : [];
+  const topRefs = allScored.slice(0, 3);
+  const visibleCitations = topRefs;
 
   const goalKcal = Number(userProfile?.dailyCalories || 0);
   const consumedKcal = Number(dailyTracking?.consumedKcal || 0);
@@ -575,7 +592,7 @@ export async function runHybridRagQuery(
           const resultObj = {
             guardrailTriggered: Boolean(data.guardrailTriggered),
             answer: data.answer,
-            citations: Array.isArray(data.citations) && data.citations.length > 0 ? data.citations : userCitations,
+            citations: Array.isArray(data.citations) && data.citations.length > 0 ? data.citations : visibleCitations,
             tokenMetrics: {
               tokensUsed,
               tokensSaved: Math.max(0, rawUncompressedEstimate - tokensUsed),
@@ -605,7 +622,7 @@ export async function runHybridRagQuery(
     answer: withinDailyBudget
       ? localAnswer
       : `${localAnswer}\n\n*(Modo Ahorro de Tokens activo: se alcanzó el límite diario de ${TOKEN_GOVERNANCE.DAILY_TOKEN_BUDGET.toLocaleString()} tokens LLM, por lo que sigo guiándote sin interrupción con el motor RAG local de 0 tokens).*`,
-    citations: userCitations,
+    citations: visibleCitations,
     tokenMetrics: {
       tokensUsed: 0,
       tokensSaved: 950,
