@@ -7,6 +7,7 @@ import {
   computeMetabolicMetrics
 } from './countryNutritionData';
 import { GLOBAL_MEDICAL_RAG_DOCUMENTS } from './clinicalKnowledgeBase';
+import { buildPatientClinicalRagDoc } from './clinicalSyncService';
 
 // Gobernanza y Presupuesto de Tokens para uso diario a largo plazo (evita fatiga de contexto y sobrecosto)
 export const TOKEN_GOVERNANCE = {
@@ -171,7 +172,9 @@ const NUTRITION_KEYWORDS = [
   'nopal', 'amaranto', 'yuca', 'guayaba', 'camote', 'palta', 'jurel', 'chochos', 'sardina', 'zapallo', 'arepa',
   'diabetes', 'prediabetes', 'hipertension', 'presion', 'gastritis', 'colon', 'anemia', 'fatiga',
   'cansancio', 'sodio', 'potasio', 'dash', 'ada', 'oms', 'issn', 'medico', 'clinico', 'condicion',
-  'memoria', 'historial', 'evolucion', 'tendencia', 'conoces', 'habito', 'sueno', 'cortisol'
+  'memoria', 'historial', 'evolucion', 'tendencia', 'conoces', 'habito', 'sueno', 'cortisol',
+  'clinica', 'hospital', 'laboratorio', 'examen', 'hba1c', 'ldl', 'hdl', 'hemoglobina',
+  'alergia', 'medicamento', 'metformina', 'losartan', 'levotiroxina', 'estatina', 'expediente', 'rubrica', 'gmail'
 ];
 
 const OFF_TOPIC_TRIGGERS = [
@@ -267,7 +270,15 @@ export function evaluateNutritionGuardrail(question) {
   return { allowed: true, calmMessage: null };
 }
 
-function buildSmartLocalSynthesis(question, topRefs, userProfile, dailyTracking, hasUserDocs, userMemory) {
+function buildSmartLocalSynthesis(
+  question,
+  topRefs,
+  userProfile,
+  dailyTracking,
+  hasUserDocs,
+  userMemory,
+  clinicalContext = null
+) {
   const normQ = normalizeText(question);
   const name = userProfile?.name ? userProfile.name.split(' ')[0] : '';
   const country = getCountryProfile(userProfile?.country || 'CO');
@@ -387,6 +398,15 @@ function buildSmartLocalSynthesis(question, topRefs, userProfile, dailyTracking,
     );
   }
 
+  if (clinicalContext?.clinicalRecord && clinicalContext?.rubric) {
+    const rec = clinicalContext.clinicalRecord;
+    const rub = clinicalContext.rubric;
+    const alerts = [...(rub.biomarkerAlerts || []), ...(rub.drugNutrientAlerts || [])];
+    lines.push(
+      `\n**Expediente Clínico Coordinado (${rec.institutionName} · Concordancia ${rub.totalScore}%):** Glucosa ${rec.fastingGlucose} mg/dL · HbA1c ${rec.hba1c}% · LDL ${rec.ldlCholesterol} mg/dL · PA ${rec.bloodPressureSys}/${rec.bloodPressureDia} mmHg.${alerts.length > 0 ? ` ${alerts[0]}` : ' Todos tus biomarcadores principales están coordinados con tu plan.'}`
+    );
+  }
+
   if (topRefs[0]) {
     lines.push(
       `*(Fuente RAG consultada: ${topRefs[0].documentName}, Pág. ${topRefs[0].pageNumber})*`
@@ -403,7 +423,8 @@ export async function runHybridRagQuery(
   userProfile,
   dailyTracking,
   userMemory = null,
-  tokenBudgetState = null
+  tokenBudgetState = null,
+  clinicalContext = null
 ) {
   const guardrail = evaluateNutritionGuardrail(question);
   if (!guardrail.allowed) {
@@ -435,9 +456,14 @@ export async function runHybridRagQuery(
 
   const hasUserDocs = Array.isArray(documents) && documents.length > 0;
   const countryRagDoc = buildCountryRagDocument(userProfile?.country || 'CO');
-  const docsToSearch = hasUserDocs
+  const patientClinicalDoc = buildPatientClinicalRagDoc(
+    clinicalContext?.clinicalRecord,
+    clinicalContext?.rubric
+  );
+  const baseDocs = hasUserDocs
     ? [...documents, ...GLOBAL_MEDICAL_RAG_DOCUMENTS, countryRagDoc]
     : [...INITIAL_DOCUMENTS, ...GLOBAL_MEDICAL_RAG_DOCUMENTS, countryRagDoc];
+  const docsToSearch = patientClinicalDoc ? [patientClinicalDoc, ...baseDocs] : baseDocs;
 
   const qVec = computeEmbedding(question);
   const qWords = normalizeText(question)
@@ -494,11 +520,16 @@ export async function runHybridRagQuery(
   const physicalNotesText = userProfile?.physicalNotes ? `, Factores físicos adicionales: ${userProfile.physicalNotes}` : '';
 
   const memoryBlock = userMemory?.memoryPromptSummary ? `\n\n${userMemory.memoryPromptSummary}` : '';
+  const clinicalBlock =
+    clinicalContext?.clinicalRecord && clinicalContext?.rubric
+      ? `\n\nExpediente clínico real vinculado por correo (${clinicalContext.clinicalRecord.patientEmail} en ${clinicalContext.clinicalRecord.institutionName}, concordancia ${clinicalContext.rubric.totalScore}%): Glucosa ${clinicalContext.clinicalRecord.fastingGlucose} mg/dL, HbA1c ${clinicalContext.clinicalRecord.hba1c}%, LDL ${clinicalContext.clinicalRecord.ldlCholesterol} mg/dL, Triglicéridos ${clinicalContext.clinicalRecord.triglycerides} mg/dL, Hemoglobina ${clinicalContext.clinicalRecord.hemoglobin} g/dL, PA ${clinicalContext.clinicalRecord.bloodPressureSys}/${clinicalContext.clinicalRecord.bloodPressureDia} mmHg, Alergias: ${clinicalContext.clinicalRecord.allergies}, Medicación: ${clinicalContext.clinicalRecord.medications}.`
+      : '';
   const profileSummary =
     (goalKcal > 0
       ? `Datos del usuario en sesión: Nombre: ${userProfile.name}, País: ${country.name} (Productividad local: ${country.productivityFocus}; Plus nutricional: ${country.nutritionalPlus}), Presupuesto/posibilidades: ${budget.label}, Peso: ${userProfile.weightKg || 0} kg, ${metabolicText}${physicalNotesText}. Meta diaria: ${goalKcal} kcal (${userProfile.targetCarbs}g carbohidratos, ${userProfile.targetProtein}g proteína, ${userProfile.targetFat}g grasas). Progreso registrado hoy: ${consumedKcal} kcal consumidas (${consumedCarbs}g carbs, ${consumedProtein}g proteína, ${consumedFat}g grasas) y ${waterTodayMl} ml de agua.`
       : `Datos del usuario en sesión: Nombre: ${userProfile?.name || 'Usuario'}, País: ${country.name} (Plus: ${country.nutritionalPlus}), Presupuesto: ${budget.label}, ${metabolicText}${physicalNotesText}. Aún tiene sus metas en 0 kcal (lleva ${consumedKcal} kcal registradas hoy y ${waterTodayMl} ml de agua).`) +
-    memoryBlock;
+    memoryBlock +
+    clinicalBlock;
 
   // Compresión estricta de contexto (máx. 900 tokens de entrada) para que la IA no se sature a largo plazo
   const compactProfileSummary = trimToTokenBudget(profileSummary, 420);
@@ -632,7 +663,8 @@ Consulta: ${question}`;
     userProfile,
     dailyTracking,
     hasUserDocs,
-    userMemory
+    userMemory,
+    clinicalContext
   );
   const localResult = {
     guardrailTriggered: false,

@@ -175,3 +175,73 @@ ON body_progress_logs (user_id, log_date DESC);
 
 CREATE INDEX IF NOT EXISTS idx_ai_telemetry_user_date
 ON ai_performance_telemetry (user_id, event_date DESC);
+
+
+-- ----------------------------------------------------------------------------
+-- 5. INTEROPERABILIDAD CLÍNICA / HOSPITALARIA Y RÚBRICA DE COORDINACIÓN POR EMAIL
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS clinical_institutions (
+    institution_id VARCHAR(64) PRIMARY KEY,
+    institution_name VARCHAR(180) NOT NULL,
+    institution_type VARCHAR(40) NOT NULL, -- clinica_nutricion | hospital | laboratorio
+    country_code VARCHAR(4) REFERENCES country_food_productivity(country_code),
+    specialty VARCHAR(120) NOT NULL,
+    fhir_endpoint_url VARCHAR(255),
+    verified BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Base extensa de conocimiento clínico/hospitalario ingerido en el motor RAG
+CREATE TABLE IF NOT EXISTS hospital_knowledge_corpus (
+    corpus_id VARCHAR(64) PRIMARY KEY,
+    institution_id VARCHAR(64) NOT NULL REFERENCES clinical_institutions(institution_id) ON DELETE CASCADE,
+    document_id VARCHAR(64) REFERENCES nutritional_documents(id) ON DELETE SET NULL,
+    specialty_area VARCHAR(120) NOT NULL,
+    evidence_grade VARCHAR(8) DEFAULT 'A', -- A | B | C
+    protocol_summary TEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Expediente clínico real del paciente vinculado mediante su Gmail/correo verificado
+CREATE TABLE IF NOT EXISTS patient_clinical_records (
+    record_id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(64) REFERENCES users_biometric_profiles(user_id) ON DELETE CASCADE,
+    institution_id VARCHAR(64) REFERENCES clinical_institutions(institution_id),
+    patient_email VARCHAR(160) NOT NULL,
+    consent_granted BOOLEAN DEFAULT FALSE,
+    consent_timestamp TIMESTAMP,
+    exam_date DATE NOT NULL,
+    clinical_weight_kg NUMERIC(5,2),
+    fasting_glucose_mg_dl NUMERIC(5,1),
+    hba1c_pct NUMERIC(4,2),
+    ldl_cholesterol_mg_dl NUMERIC(5,1),
+    hdl_cholesterol_mg_dl NUMERIC(5,1),
+    triglycerides_mg_dl NUMERIC(5,1),
+    hemoglobin_g_dl NUMERIC(4,1),
+    blood_pressure_sys INT,
+    blood_pressure_dia INT,
+    icd10_codes TEXT,
+    allergies_text TEXT,
+    medications_text TEXT,
+    clinician_notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Rúbrica de coordinación entre datos reales del usuario en la app y sus registros clínicos
+CREATE TABLE IF NOT EXISTS clinical_reconciliation_rubric (
+    reconciliation_id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(64) NOT NULL REFERENCES users_biometric_profiles(user_id) ON DELETE CASCADE,
+    record_id VARCHAR(64) NOT NULL REFERENCES patient_clinical_records(record_id) ON DELETE CASCADE,
+    email_match_verified BOOLEAN NOT NULL,
+    consent_verified BOOLEAN NOT NULL,
+    concordance_score_pct INT NOT NULL,
+    discrepancies_summary TEXT,
+    auto_synced_conditions TEXT,
+    reconciled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_patient_clinical_email
+ON patient_clinical_records (LOWER(patient_email));
+
+CREATE INDEX IF NOT EXISTS idx_clinical_reconciliation_user
+ON clinical_reconciliation_rubric (user_id, reconciled_at DESC);

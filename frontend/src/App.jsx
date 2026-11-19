@@ -15,6 +15,11 @@ import {
   getActiveMedicalProtocols
 } from './services/clinicalKnowledgeBase';
 import {
+  CLINICAL_INSTITUTIONS,
+  buildInitialClinicalRecordForEmail,
+  evaluateClinicalReconciliationRubric
+} from './services/clinicalSyncService';
+import {
   GOAL_OPTIONS,
   getTodayIso,
   loadUsers,
@@ -183,6 +188,10 @@ export default function App() {
   const [copilotInput, setCopilotInput] = useState('');
   const [copilotReply, setCopilotReply] = useState(null);
   const [isCopilotLoading, setIsCopilotLoading] = useState(false);
+
+  // Vinculación Clínica / Hospitalaria por correo (Gmail/Email)
+  const [selectedInstitutionId, setSelectedInstitutionId] = useState(CLINICAL_INSTITUTIONS[0].id);
+  const [clinicalSyncNotice, setClinicalSyncNotice] = useState('');
 
   useEffect(() => {
     if (currentUser) {
@@ -398,6 +407,12 @@ export default function App() {
       queries: 0
     };
 
+    const activeClinicalRec = workspace?.clinicalRecord || null;
+    const activeClinicalRubric = evaluateClinicalReconciliationRubric({
+      userProfile: currentUser,
+      clinicalRecord: activeClinicalRec
+    });
+
     const t0 = performance.now();
     const result = await runHybridRagQuery(
       q,
@@ -406,7 +421,8 @@ export default function App() {
       currentUser,
       dailyTracking,
       currentMemory,
-      { tokensUsedToday: todayTokenStats.used }
+      { tokensUsedToday: todayTokenStats.used },
+      activeClinicalRec ? { clinicalRecord: activeClinicalRec, rubric: activeClinicalRubric } : null
     );
     const latencyMs = Math.max(1, Math.round(performance.now() - t0));
 
@@ -774,6 +790,12 @@ export default function App() {
     });
     const todayStats = workspace?.tokenUsageByDate?.[todayIso] || { used: 0, saved: 0, queries: 0 };
 
+    const activeClinicalRec = workspace?.clinicalRecord || null;
+    const activeClinicalRubric = evaluateClinicalReconciliationRubric({
+      userProfile: currentUser,
+      clinicalRecord: activeClinicalRec
+    });
+
     const t0 = performance.now();
     const res = await runHybridRagQuery(
       q,
@@ -782,7 +804,8 @@ export default function App() {
       currentUser,
       dailyTracking,
       currentMemory,
-      { tokensUsedToday: todayStats.used }
+      { tokensUsedToday: todayStats.used },
+      activeClinicalRec ? { clinicalRecord: activeClinicalRec, rubric: activeClinicalRubric } : null
     );
     const latencyMs = Math.max(1, Math.round(performance.now() - t0));
     const deltaUsed = Number(res.tokenMetrics?.tokensUsed || 0);
@@ -825,6 +848,50 @@ export default function App() {
       };
     });
     setIsCopilotLoading(false);
+  };
+
+  const handleSyncClinicByEmail = () => {
+    if (!currentUser) return;
+    const synced = buildInitialClinicalRecordForEmail({
+      email: currentUser.email,
+      institutionId: selectedInstitutionId,
+      userWeightKg: currentUser.weightKg
+    });
+    updateWorkspace(prev => ({
+      ...prev,
+      clinicalRecord: synced
+    }));
+    setClinicalSyncNotice(
+      `Expediente clínico vinculado mediante ${currentUser.email} (${synced.institutionName}).`
+    );
+    setTimeout(() => setClinicalSyncNotice(''), 4500);
+  };
+
+  const handleUpdateClinicalField = (field, value) => {
+    updateWorkspace(prev => {
+      if (!prev.clinicalRecord) return prev;
+      return {
+        ...prev,
+        clinicalRecord: {
+          ...prev.clinicalRecord,
+          [field]: value
+        }
+      };
+    });
+  };
+
+  const handleApplyRubricConditionsToProfile = (detectedConditions) => {
+    if (!currentUser || !Array.isArray(detectedConditions) || detectedConditions.length === 0) return;
+    const merged = Array.from(
+      new Set([...(currentUser.medicalConditions || []), ...detectedConditions])
+    );
+    const updated = updateUserProfile(currentUser.id, { medicalConditions: merged });
+    if (updated) {
+      setCurrentUser(updated);
+      setProfMedicalConditions(merged);
+      setClinicalSyncNotice('Protocolos detectados por la rúbrica aplicados a tu perfil IA.');
+      setTimeout(() => setClinicalSyncNotice(''), 4000);
+    }
   };
 
   // ============================================================================
@@ -1116,6 +1183,11 @@ export default function App() {
       waterTodayMl,
       mealsCount: mealsToday.length
     }
+  });
+  const clinicalRecord = workspace.clinicalRecord || null;
+  const clinicalRubric = evaluateClinicalReconciliationRubric({
+    userProfile: currentUser,
+    clinicalRecord
   });
 
   return (
@@ -2474,6 +2546,218 @@ export default function App() {
                     </div>
                   )}
                 </div>
+              </div>
+
+              {/* VINCULACIÓN CLÍNICA / HOSPITALARIA POR CORREO + RÚBRICA DE COORDINACIÓN */}
+              <div className="card" style={{ marginTop: '20px' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start',
+                    gap: '12px',
+                    flexWrap: 'wrap',
+                    marginBottom: '12px'
+                  }}
+                >
+                  <div>
+                    <span className="tag-pill">
+                      Interoperabilidad Clínica / Hospitalaria · Correo verificado: {currentUser.email}
+                    </span>
+                    <div className="card-title" style={{ marginTop: '8px' }}>
+                      Expediente Clínico Real y Rúbrica de Coordinación de Datos
+                    </div>
+                    <div className="card-desc" style={{ marginBottom: 0 }}>
+                      Conecta tus registros de clínicas especializadas u hospitales mediante el mismo Gmail/correo con el que estás registrado. La rúbrica audita la concordancia con tus datos reales para que la IA te guíe con precisión clínica.
+                    </div>
+                  </div>
+                  {clinicalRubric && (
+                    <span className="tag-pill" style={{ fontWeight: 600 }}>
+                      Concordancia Rúbrica: {clinicalRubric.totalScore}%
+                    </span>
+                  )}
+                </div>
+
+                {!clinicalRecord ? (
+                  <div className="form-stack" style={{ marginTop: '12px' }}>
+                    <div className="field-row">
+                      <div className="field-group">
+                        <label className="field-label">Clínica especializada u hospital de origen</label>
+                        <select
+                          className="input-clean"
+                          value={selectedInstitutionId}
+                          onChange={e => setSelectedInstitutionId(e.target.value)}
+                        >
+                          {CLINICAL_INSTITUTIONS.map(inst => (
+                            <option key={inst.id} value={inst.id}>
+                              {inst.name} — {inst.evidenceGrade}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="field-group" style={{ justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          className="btn-solid"
+                          onClick={handleSyncClinicByEmail}
+                        >
+                          Sincronizar expediente con {currentUser.email}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="split-grid" style={{ marginTop: '14px' }}>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: '0.84rem', marginBottom: '8px' }}>
+                        Laboratorios y expediente clínico ({clinicalRecord.institutionName})
+                      </div>
+                      <div className="form-stack">
+                        <div className="field-row">
+                          <div className="field-group">
+                            <label className="field-label">Glucosa ayunas (mg/dL)</label>
+                            <input
+                              type="number"
+                              className="input-clean"
+                              value={clinicalRecord.fastingGlucose}
+                              onChange={e => handleUpdateClinicalField('fastingGlucose', Number(e.target.value))}
+                            />
+                          </div>
+                          <div className="field-group">
+                            <label className="field-label">HbA1c (%)</label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              className="input-clean"
+                              value={clinicalRecord.hba1c}
+                              onChange={e => handleUpdateClinicalField('hba1c', Number(e.target.value))}
+                            />
+                          </div>
+                        </div>
+                        <div className="field-row">
+                          <div className="field-group">
+                            <label className="field-label">Colesterol LDL (mg/dL)</label>
+                            <input
+                              type="number"
+                              className="input-clean"
+                              value={clinicalRecord.ldlCholesterol}
+                              onChange={e => handleUpdateClinicalField('ldlCholesterol', Number(e.target.value))}
+                            />
+                          </div>
+                          <div className="field-group">
+                            <label className="field-label">Triglicéridos (mg/dL)</label>
+                            <input
+                              type="number"
+                              className="input-clean"
+                              value={clinicalRecord.triglycerides}
+                              onChange={e => handleUpdateClinicalField('triglycerides', Number(e.target.value))}
+                            />
+                          </div>
+                        </div>
+                        <div className="field-row">
+                          <div className="field-group">
+                            <label className="field-label">Hemoglobina (g/dL)</label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              className="input-clean"
+                              value={clinicalRecord.hemoglobin}
+                              onChange={e => handleUpdateClinicalField('hemoglobin', Number(e.target.value))}
+                            />
+                          </div>
+                          <div className="field-group">
+                            <label className="field-label">Presión sistólica (mmHg)</label>
+                            <input
+                              type="number"
+                              className="input-clean"
+                              value={clinicalRecord.bloodPressureSys}
+                              onChange={e => handleUpdateClinicalField('bloodPressureSys', Number(e.target.value))}
+                            />
+                          </div>
+                        </div>
+                        <div className="field-row">
+                          <div className="field-group">
+                            <label className="field-label">Alergias / Intolerancias</label>
+                            <input
+                              type="text"
+                              className="input-clean"
+                              value={clinicalRecord.allergies}
+                              onChange={e => handleUpdateClinicalField('allergies', e.target.value)}
+                            />
+                          </div>
+                          <div className="field-group">
+                            <label className="field-label">Medicación actual</label>
+                            <input
+                              type="text"
+                              className="input-clean"
+                              placeholder="Ej. Metformina, Losartán, Levotiroxina..."
+                              value={clinicalRecord.medications}
+                              onChange={e => handleUpdateClinicalField('medications', e.target.value)}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: '0.84rem', marginBottom: '8px' }}>
+                        Rúbrica de Coordinación Clínica (5 Criterios · {clinicalRubric?.totalScore || 0}/100)
+                      </div>
+                      <div className="list-stack">
+                        {(clinicalRubric?.criteria || []).map(c => (
+                          <div key={c.name} className="list-item-card" style={{ padding: '8px 12px' }}>
+                            <span style={{ fontSize: '0.79rem' }}>{c.name}</span>
+                            <strong style={{ fontSize: '0.8rem' }}>
+                              {c.score} / {c.max}
+                            </strong>
+                          </div>
+                        ))}
+
+                        {clinicalRubric?.biomarkerAlerts?.length > 0 && (
+                          <div className="list-item-card" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                            <strong style={{ fontSize: '0.8rem', color: 'var(--accent)' }}>
+                              Alertas de biomarcadores detectadas
+                            </strong>
+                            {clinicalRubric.biomarkerAlerts.map((a, i) => (
+                              <span key={i} style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                                • {a}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {clinicalRubric?.drugNutrientAlerts?.length > 0 && (
+                          <div className="list-item-card" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                            <strong style={{ fontSize: '0.8rem' }}>Interacciones fármaco-nutriente</strong>
+                            {clinicalRubric.drugNutrientAlerts.map((a, i) => (
+                              <span key={i} style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                                • {a}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {clinicalRubric?.missingSyncedConditions?.length > 0 && (
+                          <button
+                            type="button"
+                            className="btn-solid"
+                            onClick={() =>
+                              handleApplyRubricConditionsToProfile(clinicalRubric.detectedConditions)
+                            }
+                          >
+                            Aplicar {clinicalRubric.missingSyncedConditions.length} protocolo(s) clínico(s) detectado(s) a mi perfil IA
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {clinicalSyncNotice && (
+                  <div style={{ marginTop: '10px', fontSize: '0.8rem', color: 'var(--accent)', fontWeight: 500 }}>
+                    {clinicalSyncNotice}
+                  </div>
+                )}
               </div>
             </div>
           );
