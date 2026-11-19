@@ -1248,6 +1248,25 @@ export default function App() {
             </div>
           </section>
 
+          <section className="landing-metrics-strip">
+            <div className="landing-metric-pill">
+              <div className="landing-metric-num">40+</div>
+              <div className="landing-metric-label">Alimentos con Nutri-Score A–E y Micronutrientes</div>
+            </div>
+            <div className="landing-metric-pill">
+              <div className="landing-metric-num">8 Países</div>
+              <div className="landing-metric-label">Productividad alimenticia local y presupuesto</div>
+            </div>
+            <div className="landing-metric-pill">
+              <div className="landing-metric-num">7 Guías</div>
+              <div className="landing-metric-label">OMS · ADA · DASH · ISSN · ESPEN · KDIGO · EASL</div>
+            </div>
+            <div className="landing-metric-pill">
+              <div className="landing-metric-num">HL7 FHIR</div>
+              <div className="landing-metric-label">Sincronización clínica autorizada + IA 24/7</div>
+            </div>
+          </section>
+
           <section className="landing-section">
             <div style={{ textAlign: 'center', maxWidth: '680px', margin: '0 auto' }}>
               <span className="tag-pill">Diseñada para acompañarte todos los días</span>
@@ -1926,41 +1945,41 @@ export default function App() {
               className={`sidebar-link ${activeSection === 'summary' ? 'active' : ''}`}
               onClick={() => setActiveSection('summary')}
             >
-              <span>Seguimiento diario</span>
+              <span className="sidebar-link-label"><span>📊</span> Seguimiento diario</span>
             </button>
             <button
               className={`sidebar-link ${activeSection === 'meals' ? 'active' : ''}`}
               onClick={() => setActiveSection('meals')}
             >
-              <span>Comidas</span>
+              <span className="sidebar-link-label"><span>🥗</span> Comidas</span>
               <span className="sidebar-count">{workspace.mealLogs?.length || 0}</span>
             </button>
             <button
               className={`sidebar-link ${activeSection === 'chat' ? 'active' : ''}`}
               onClick={() => setActiveSection('chat')}
             >
-              <span>Consultas</span>
+              <span className="sidebar-link-label"><span>💬</span> Consultas IA</span>
               <span className="sidebar-count">{workspace.conversations?.length || 0}</span>
             </button>
             <button
               className={`sidebar-link ${activeSection === 'documents' ? 'active' : ''}`}
               onClick={() => setActiveSection('documents')}
             >
-              <span>Mis documentos</span>
+              <span className="sidebar-link-label"><span>📄</span> Mis documentos</span>
               <span className="sidebar-count">{workspace.documents?.length || 0}</span>
             </button>
             <button
               className={`sidebar-link ${activeSection === 'analytics' ? 'active' : ''}`}
               onClick={() => setActiveSection('analytics')}
             >
-              <span>Rendimiento e IA</span>
+              <span className="sidebar-link-label"><span>🩺</span> Rendimiento e IA</span>
               <span className="sidebar-count">{userMemory.knowledgeScore}%</span>
             </button>
             <button
               className={`sidebar-link ${activeSection === 'profile' ? 'active' : ''}`}
               onClick={() => setActiveSection('profile')}
             >
-              <span>Mi cuenta y metas</span>
+              <span className="sidebar-link-label"><span>⚙️</span> Mi cuenta y metas</span>
             </button>
           </nav>
         </div>
