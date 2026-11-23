@@ -11,10 +11,10 @@
   --brand-leaf: #1E5631;
   --brand-leaf-hover: #164225;
   --brand-leaf-soft: #E3EFE6;
-  --accent-carrot: #D95D24;
-  --accent-carrot-hover: #BA4B18;
+  --accent-carrot: #B84714;
+  --accent-carrot-hover: #9A3A0E;
   --accent-carrot-soft: #FDF0E8;
-  --accent-earth: #8C5A3C;
+  --accent-earth: #7A4E33;
   --accent-earth-soft: #F5EBE4;
   --shadow-card: 0 6px 22px rgba(30, 38, 31, 0.06);
   --shadow-hover: 0 14px 32px rgba(30, 86, 49, 0.12);
@@ -294,7 +294,8 @@ button, input, select, textarea {
   animation: nsMarquee 42s linear infinite;
 }
 
-.ns-food-strip:hover {
+.ns-food-strip:hover,
+.ns-food-strip:focus-within {
   animation-play-state: paused;
 }
 

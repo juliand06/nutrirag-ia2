@@ -8,7 +8,8 @@
 
 import { GLOBAL_FOOD_DATABASE, scaleFoodPortion } from '../services/foodDatabase';
 import { getCountryProfile, getBudgetProfile } from '../services/countryNutritionData';
-import { MEDICAL_CONDITIONS } from '../services/clinicalKnowledgeBase';
+import { MEDICAL_CONDITIONS, CLINICAL_DRUG_NUTRIENT_INTERACTIONS } from '../services/clinicalKnowledgeBase';
+import { getLocalTodayIso } from './nutritionCalculator';
 
 function norm(str) {
   return String(str || '')
@@ -17,9 +18,19 @@ function norm(str) {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
+// Matriz estructurada de alérgenos y sinónimos clínicos (FDA / EFSA Big 8/9)
+const ALLERGEN_SYNONYM_MATRIX = {
+  lactosa: ['queso', 'leche', 'yogur', 'cottage', 'suero', 'whey', 'caseina', 'mantequilla', 'crema de leche', 'lactosa', 'kumis'],
+  gluten: ['trigo', 'pan ', 'pan integral', 'masa madre', 'pasta', 'cebada', 'centeno', 'semola', 'cuscus', 'malta', 'galleta'],
+  huevo: ['huevo', 'claras', 'yema', 'albumina', 'mayonesa'],
+  mariscos_pescado: ['salmon', 'trucha', 'atun', 'sardina', 'jurel', 'bonito', 'camaron', 'langostino', 'cangrejo', 'marisco', 'pescado', 'tilapia', 'merluza', 'pulpo', 'calamar'],
+  mani_frutos_secos: ['mani', 'cacahuate', 'nuez', 'nueces', 'almendra', 'pistacho', 'maranon', 'anacardo', 'avellana', 'pecana', 'macadamia'],
+  soya: ['soya', 'soja', 'tofu', 'edamame', 'tempeh', 'lecitina de soya']
+};
+
 /**
- * Mapea tanto los IDs del onboarding ('diabetes', 'hipertension', 'colesterol')
- * como los IDs clínicos extendidos a los protocolos médicos oficiales.
+ * Mapea tanto los IDs del onboarding ('diabetes', 'hipertension', 'colesterol', 'tiroides', 'sop', 'renal')
+ * como los IDs clínicos extendidos a los protocolos médicos oficiales, aplicando jerarquía de precedencia clínica.
  */
 export function resolveUserClinicalProtocols(userProfile = {}) {
   const raw = [
@@ -27,6 +38,8 @@ export function resolveUserClinicalProtocols(userProfile = {}) {
     ...(Array.isArray(userProfile?.medicalConditions) ? userProfile.medicalConditions : [])
   ];
   const goal = userProfile?.goal || '';
+  const dietType = norm(userProfile?.dietType || '');
+  const allergies = (userProfile?.allergies || []).map(norm);
   const mappedIds = new Set();
 
   raw.forEach(id => {
@@ -52,16 +65,47 @@ export function resolveUserClinicalProtocols(userProfile = {}) {
     if (clean.includes('renal') || clean.includes('rinon')) {
       mappedIds.add('salud_renal_kdigo');
     }
+    if (clean.includes('tiroid') || clean.includes('hipotiroid')) {
+      mappedIds.add('hipotiroidismo_metabolico');
+    }
+    if (clean.includes('sop') || clean.includes('ovario') || clean.includes('poliquist')) {
+      mappedIds.add('sop_endocrino');
+    }
+    if (clean.includes('celiac') || clean.includes('gluten')) {
+      mappedIds.add('enfermedad_celiaca_gluten');
+    }
   });
 
-  if (goal === 'masa_muscular') {
+  if (dietType === 'sin_gluten' || allergies.some(a => a.includes('gluten') || a.includes('trigo'))) {
+    mappedIds.add('enfermedad_celiaca_gluten');
+  }
+
+  // Jerarquía de precedencia clínica: Si hay enfermedad renal (KDIGO), NO se activa hipertrofia hiperproteica (ISSN)
+  const hasRenalPrecedence = mappedIds.has('salud_renal_kdigo');
+  if (goal === 'masa_muscular' && !hasRenalPrecedence) {
     mappedIds.add('rendimiento_deportivo');
   }
   if (goal === 'control_condicion' && mappedIds.size === 0) {
     mappedIds.add('resistencia_insulina_diabetes');
   }
 
-  const protocols = MEDICAL_CONDITIONS.filter(c => mappedIds.has(c.id));
+  let protocols = MEDICAL_CONDITIONS.filter(c => mappedIds.has(c.id));
+
+  // Ordenar por prioridad clínica: KDIGO renal > ADA diabetes > DASH hipertensión > resto
+  const priorityOrder = [
+    'salud_renal_kdigo',
+    'resistencia_insulina_diabetes',
+    'hipertension_cardiovascular',
+    'colesterol_trigliceridos',
+    'higado_graso_metabolico',
+    'hipotiroidismo_metabolico',
+    'sop_endocrino',
+    'enfermedad_celiaca_gluten',
+    'anemia_fatiga',
+    'gastritis_digestion',
+    'rendimiento_deportivo'
+  ];
+  protocols = protocols.sort((a, b) => priorityOrder.indexOf(a.id) - priorityOrder.indexOf(b.id));
 
   // Si no tiene condición médica específica, activamos el protocolo preventivo OMS/ESPEN de base
   if (protocols.length === 0) {
@@ -81,6 +125,14 @@ export function resolveUserClinicalProtocols(userProfile = {}) {
 }
 
 /**
+ * Obtiene las alertas de farmacovigilancia alimento-medicamento relevantes para los protocolos activos de la persona.
+ */
+export function resolveDrugNutrientInteractions(protocols = []) {
+  const activeIds = new Set((protocols || []).map(p => p.id));
+  return CLINICAL_DRUG_NUTRIENT_INTERACTIONS.filter(item => activeIds.has(item.conditionId));
+}
+
+/**
  * Evalúa si un alimento es compatible con las alergias, intolerancias, gustos (dislikedFoods),
  * tipo de dieta (vegana, vegetariana, sin_gluten, sin_lactosa) y condiciones médicas de la persona.
  */
@@ -89,6 +141,7 @@ export function evaluateFoodPersonalCompatibility(food, userProfile = {}) {
 
   const foodName = norm(food.name);
   const foodCat = norm(food.category);
+  const foodTags = Array.isArray(food.allergens) ? food.allergens.map(norm) : [];
   const allergies = (userProfile?.allergies || []).map(norm);
   const customAllergy = norm(userProfile?.customAllergy || '');
   const dislikedRaw = norm(userProfile?.dislikedFoods || '');
@@ -97,6 +150,9 @@ export function evaluateFoodPersonalCompatibility(food, userProfile = {}) {
 
   const reasons = [];
   let level = 'optimal'; // 'optimal' | 'caution' | 'avoid'
+
+  const matchesAnyKeyword = (keywords) =>
+    keywords.some(kw => foodName.includes(kw) || foodTags.some(t => t.includes(kw)));
 
   // 1. Alimentos que no le gustan (dislikedFoods)
   const dislikedTokens = dislikedRaw
@@ -110,50 +166,72 @@ export function evaluateFoodPersonalCompatibility(food, userProfile = {}) {
     }
   }
 
-  // 2. Alergias e intolerancias
-  if (customAllergy.length >= 3 && foodName.includes(customAllergy)) {
-    level = 'avoid';
-    reasons.push(`Coincide con tu alergia/intolerancia registrada ("${userProfile.customAllergy}").`);
+  // 2. Alergias e intolerancias estructuradas + texto personalizado
+  const customAllergyTokens = customAllergy
+    .split(/[,;.\n]+/)
+    .map(t => t.trim())
+    .filter(t => t.length >= 3);
+  for (const token of customAllergyTokens) {
+    if (foodName.includes(token) || foodTags.some(t => t.includes(token))) {
+      level = 'avoid';
+      reasons.push(`Coincide con tu alergia/intolerancia registrada ("${token}").`);
+    }
   }
 
   if (
-    (allergies.some(a => a.includes('lactosa') || a.includes('lacteo')) || dietType === 'sin_lactosa') &&
-    (foodName.includes('queso') || foodName.includes('leche') || foodName.includes('yogur'))
+    (allergies.some(a => a.includes('lactosa') || a.includes('lacteo') || a.includes('leche')) || dietType === 'sin_lactosa') &&
+    matchesAnyKeyword(ALLERGEN_SYNONYM_MATRIX.lactosa)
   ) {
     level = 'avoid';
-    reasons.push('Contiene lácteos/lactosa. Te sugerimos tofu, huevo o bebida vegetal sin azúcar.');
+    reasons.push('Contiene lácteos/lactosa o derivados (suero/caseína). Te sugerimos tofu, huevo o bebida vegetal sin azúcar.');
   }
 
   if (
-    (allergies.some(a => a.includes('gluten') || a.includes('trigo')) || dietType === 'sin_gluten') &&
-    (foodName.includes('trigo') || foodName.includes('pan ') || foodName.includes('pasta'))
+    (allergies.some(a => a.includes('gluten') || a.includes('trigo') || a.includes('celiac')) || dietType === 'sin_gluten') &&
+    matchesAnyKeyword(ALLERGEN_SYNONYM_MATRIX.gluten)
   ) {
     level = 'avoid';
-    reasons.push('Puede contener gluten. Cambia por arepa de maíz, quinua, arroz integral o papa.');
+    reasons.push('Contiene trigo/gluten (TACC). Cambia por arepa de maíz, quinua, amaranto, arroz integral, yuca o papa.');
   }
 
   if (
     allergies.some(a => a.includes('huevo')) &&
-    (foodName.includes('huevo') || foodName.includes('claras'))
+    matchesAnyKeyword(ALLERGEN_SYNONYM_MATRIX.huevo)
   ) {
     level = 'avoid';
     reasons.push('Excluido por tu alergia al huevo.');
   }
 
   if (
-    allergies.some(a => a.includes('marisco') || a.includes('pescado')) &&
-    (foodName.includes('salmon') || foodName.includes('trucha') || foodName.includes('atun') || foodName.includes('sardina') || foodName.includes('jurel'))
+    allergies.some(a => a.includes('marisco') || a.includes('pescado') || a.includes('camaron')) &&
+    matchesAnyKeyword(ALLERGEN_SYNONYM_MATRIX.mariscos_pescado)
   ) {
     level = 'avoid';
-    reasons.push('Excluido por alergia a pescado/mariscos.');
+    reasons.push('Excluido por alergia a pescados o mariscos.');
   }
 
   if (
-    allergies.some(a => a.includes('mani') || a.includes('frutos secos')) &&
-    (foodName.includes('mani') || foodName.includes('nueces') || foodName.includes('almendra'))
+    allergies.some(a => a.includes('mani') || a.includes('cacahuate') || a.includes('frutos secos') || a.includes('nuez') || a.includes('almendra')) &&
+    matchesAnyKeyword(ALLERGEN_SYNONYM_MATRIX.mani_frutos_secos)
   ) {
     level = 'avoid';
-    reasons.push('Excluido por alergia a maní o frutos secos.');
+    reasons.push('Excluido por alergia a maní/cacahuate o frutos secos de árbol.');
+  }
+
+  if (
+    allergies.some(a => a.includes('soya') || a.includes('soja')) &&
+    matchesAnyKeyword(ALLERGEN_SYNONYM_MATRIX.soya)
+  ) {
+    level = 'avoid';
+    reasons.push('Excluido por alergia o intolerancia a la soya.');
+  }
+
+  // Advertencia de seguridad para productos externos escaneados sin metadatos verificados de alérgenos
+  const userHasAnyAllergy =
+    allergies.some(a => a !== 'ninguna') || customAllergyTokens.length > 0 || dietType === 'sin_gluten' || dietType === 'sin_lactosa';
+  if (level !== 'avoid' && food.isExternalScan && !food.allergensVerified && userHasAnyAllergy) {
+    level = 'caution';
+    reasons.push('Producto externo sin trazas verificadas en laboratorio: revisa siempre la declaración de alérgenos del empaque físico.');
   }
 
   // 3. Tipo de alimentación (Vegana / Vegetariana)
@@ -161,18 +239,15 @@ export function evaluateFoodPersonalCompatibility(food, userProfile = {}) {
     foodName.includes('pollo') ||
     foodName.includes('res') ||
     foodName.includes('pavo') ||
-    foodName.includes('salmon') ||
-    foodName.includes('trucha') ||
-    foodName.includes('jurel') ||
-    foodName.includes('sardina') ||
-    foodName.includes('atun');
+    foodName.includes('jamon') ||
+    foodName.includes('salchicha') ||
+    foodName.includes('hamburguesa') ||
+    matchesAnyKeyword(ALLERGEN_SYNONYM_MATRIX.mariscos_pescado);
 
   const isAnimalProduct =
     isMeatOrFish ||
-    foodName.includes('huevo') ||
-    foodName.includes('claras') ||
-    foodName.includes('queso') ||
-    foodName.includes('yogur');
+    matchesAnyKeyword(ALLERGEN_SYNONYM_MATRIX.huevo) ||
+    matchesAnyKeyword(ALLERGEN_SYNONYM_MATRIX.lactosa);
 
   if (dietType === 'vegetariana' && isMeatOrFish) {
     level = 'avoid';
@@ -180,36 +255,56 @@ export function evaluateFoodPersonalCompatibility(food, userProfile = {}) {
   }
   if (dietType === 'vegana' && isAnimalProduct) {
     level = 'avoid';
-    reasons.push('No compatible con tu alimentación 100% vegana (reemplaza por tofu, quinua, frijol o garbanzos).');
+    reasons.push('No compatible con tu alimentación 100% vegana (reemplaza por tofu, chochos, quinua, frijol o garbanzos).');
   }
 
-  // 4. Cruce con condiciones clínicas (ADA, DASH, AHA)
-  const hasDiabetes = protocols.some(p => p.id === 'resistencia_insulina_diabetes');
+  // 4. Cruce clínico con condiciones médicas (ADA, DASH, AHA, KDIGO, EASL)
+  const hasDiabetes = protocols.some(p => p.id === 'resistencia_insulina_diabetes' || p.id === 'sop_endocrino');
   const hasHypertension = protocols.some(p => p.id === 'hipertension_cardiovascular');
-  const hasCholesterol = protocols.some(p => p.id === 'colesterol_trigliceridos');
+  const hasCholesterol = protocols.some(p => p.id === 'colesterol_trigliceridos' || p.id === 'higado_graso_metabolico');
+  const hasRenal = protocols.some(p => p.id === 'salud_renal_kdigo');
+
+  // Distinguir fruta entera fresca NOVA 1 con matriz de fibra intacta de azúcares añadidos/ultraprocesados (ADA)
+  const isWholeFreshFruitNova1 =
+    Number(food.novaGroup) === 1 &&
+    foodCat.includes('frutas') &&
+    Number(food.fiber) >= 1.8 &&
+    food.glycemicIndex !== 'Alto';
 
   if (level !== 'avoid') {
+    if (hasRenal && (Number(food.sodiumMg) > 280 || Number(food.novaGroup) === 4)) {
+      level = 'caution';
+      reasons.push(`Protocolo Renal KDIGO: vigila sodio (${food.sodiumMg} mg/100g) y aditivos fosfatados de procesados.`);
+    }
     if (hasHypertension && Number(food.sodiumMg) > 300) {
       level = 'caution';
-      reasons.push(`Protocolo DASH: aporta ${food.sodiumMg} mg de sodio/100g. Modera la porción y acompáñalo con vegetales ricos en potasio.`);
+      reasons.push(`Protocolo DASH: aporta ${food.sodiumMg} mg de sodio/100g. Modera la porción y acompáñalo con vegetales frescos.`);
     }
-    if (hasDiabetes && (food.glycemicIndex === 'Alto' || Number(food.sugar) > 12)) {
+    if (
+      hasDiabetes &&
+      !isWholeFreshFruitNova1 &&
+      (food.glycemicIndex === 'Alto' || (Number(food.sugar) > 12 && Number(food.novaGroup) >= 3))
+    ) {
       level = 'caution';
-      reasons.push('Protocolo ADA: índice glucémico alto. Si lo consumes, come primero una ensalada verde y una proteína magra.');
+      reasons.push('Protocolo ADA: carga glucémica alta o azúcares rápidos. Si lo consumes, aplica primero ensalada verde y proteína magra.');
     }
-    if (hasCholesterol && (food.novaGroup === 4 || Number(food.fat) > 18)) {
+    if (hasCholesterol && (Number(food.novaGroup) === 4 || (Number(food.fat) > 18 && !foodCat.includes('grasas saludables') && !foodName.includes('salmon')))) {
       level = 'caution';
-      reasons.push('Protocolo AHA Lípidos: controla la porción de grasas y prioriza fuentes con fibra soluble como avena o legumbres.');
+      reasons.push('Protocolo AHA/EASL: controla grasas saturadas/ultraprocesados y prioriza fibra soluble (avena, legumbres) y Omega-3.');
     }
   }
 
-  let clinicalTip = 'Alimento natural (NOVA 1) ideal para tus metas diarias.';
-  if (foodCat.includes('proteina') || foodCat.includes('lacteos')) {
-    clinicalTip = 'Excelente aporte de aminoácidos para preservar músculo y mantener saciedad por 4+ horas (ISSN).';
+  let clinicalTip = 'Alimento natural (NOVA 1) compatible con tus requerimientos metabólicos diarios.';
+  if (isWholeFreshFruitNova1 && hasDiabetes) {
+    clinicalTip = 'Guía ADA: Fruta entera natural (NOVA 1) con fibra intacta. Consúmela entera (nunca en jugo colado) y mejor junto a proteína o semillas.';
+  } else if (foodCat.includes('proteina') || foodCat.includes('lacteos')) {
+    clinicalTip = hasRenal
+      ? 'Proteína de alto valor biológico; ajusta los gramos a la pauta de protección renal KDIGO.'
+      : 'Excelente perfil de aminoácidos esenciales (leucina) para preservar masa muscular y saciedad por 4+ horas (ISSN/ESPEN).';
   } else if (foodCat.includes('legumbres') || Number(food.fiber) >= 4) {
-    clinicalTip = 'Su fibra soluble frena la absorción de glucosa (ADA) y ayuda a reducir el colesterol LDL (AHA).';
-  } else if (Number(food.potassiumMg) >= 350) {
-    clinicalTip = `Rico en potasio (${food.potassiumMg} mg/100g), clave en el protocolo DASH para proteger tu presión arterial.`;
+    clinicalTip = 'Su matriz de fibra soluble y almidón resistente frena el pico de glucosa posprandial (ADA) y reduce colesterol LDL (AHA).';
+  } else if (Number(food.potassiumMg) >= 350 && !hasRenal) {
+    clinicalTip = `Rico en potasio biodisponible (${food.potassiumMg} mg/100g), clave en el protocolo DASH para regular la presión arterial.`;
   }
 
   return {
@@ -217,10 +312,10 @@ export function evaluateFoodPersonalCompatibility(food, userProfile = {}) {
     level,
     badgeText:
       level === 'optimal'
-        ? 'Ideal para tu perfil clínico'
+        ? 'Compatible con tu perfil clínico'
         : level === 'caution'
           ? 'Moderar según tu protocolo'
-          : 'Excluido por tus preferencias/alergias',
+          : 'Excluido por tus alergias/preferencias',
     reasons,
     clinicalTip
   };
@@ -249,7 +344,7 @@ export function getSafeFoodsForUser(userProfile = {}) {
  * tanto para la IA Proactiva como para el Coach IA con RAG.
  */
 export function buildCompletePersonContext(userProfile = {}, workspace = {}, currentHour = new Date().getHours()) {
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = getLocalTodayIso();
   const allMeals = workspace?.mealLogs || [];
   const todayMeals = allMeals.filter(m => m.date === todayIso);
 
@@ -417,26 +512,43 @@ export function generateProactiveDailyRoadmap(userProfile = {}, workspace = {}, 
     });
   }
 
-  // 2. Acción de hidratación proactiva
+  // 2. Acción de hidratación proactiva (con precaución nefrológica KDIGO si aplica)
+  const hasRenal = ctx.protocols.some(p => p.id === 'salud_renal_kdigo');
   if (waterBehind) {
     immediateActions.push({
       id: 'act-water',
       priority: 'Hábito inmediato',
       category: 'Hidratación',
-      title: `Toma 1 vaso de agua ahora (llevas ${ctx.waterGlassesToday} de ${ expectedGlassesByNow } sugeridos para esta hora)`,
-      detail: `Para tu peso de ${userProfile?.weightKg || 67} kg tu meta es ${ctx.goals.waterMl} ml/día. Hidratarte antes de las comidas mejora la saciedad y evita confundir sed con antojos.`,
-      clinicalBasis: 'Guía OMS/EFSA de Hidratación: 35 ml/kg/día mantienen el volumen plasmático y la termogénesis.',
+      title: `Toma 1 vaso de agua ahora (llevas ${ctx.waterGlassesToday} de ${expectedGlassesByNow} sugeridos para esta hora)`,
+      detail: hasRenal
+        ? `Tu referencia orientativa es ${ctx.goals.waterMl} ml/día. Por tu protocolo renal (KDIGO), ajusta siempre el volumen total de líquidos a la pauta de tu nefrólogo.`
+        : `Para tu peso de ${userProfile?.weightKg || 67} kg tu meta es ${ctx.goals.waterMl} ml/día. Hidratarte antes de las comidas mejora la saciedad y evita confundir sed con antojos.`,
+      clinicalBasis: hasRenal
+        ? 'Guía KDIGO: balance hídrico individualizado según función renal y diuresis.'
+        : 'Guía OMS/EFSA de Hidratación: 35 ml/kg/día mantienen el volumen plasmático y la termogénesis.',
       actionType: 'add_water',
       actionLabel: '+ Sumar 1 vaso de agua (250 ml)'
     });
   }
 
   // 3. Micro-intervención clínica según lo que lleva en el día o su condición médica
-  const hasDiabetes = ctx.protocols.some(p => p.id === 'resistencia_insulina_diabetes');
+  const hasDiabetes = ctx.protocols.some(p => p.id === 'resistencia_insulina_diabetes' || p.id === 'sop_endocrino');
   const hasHypertension = ctx.protocols.some(p => p.id === 'hipertension_cardiovascular');
-  const hasCholesterol = ctx.protocols.some(p => p.id === 'colesterol_trigliceridos');
+  const hasCholesterol = ctx.protocols.some(p => p.id === 'colesterol_trigliceridos' || p.id === 'higado_graso_metabolico');
+  const hasThyroid = ctx.protocols.some(p => p.id === 'hipotiroidismo_metabolico');
+  const drugNutrientInteractions = resolveDrugNutrientInteractions(ctx.protocols);
 
-  if (hasDiabetes) {
+  if (hasRenal) {
+    immediateActions.push({
+      id: 'act-clinical-kdigo',
+      priority: 'Protocolo Médico KDIGO',
+      category: 'Protección Renal',
+      title: 'Evita aditivos fosfatados y modera el sodio (<1,500–2,000 mg/día)',
+      detail: 'Prioriza alimentos frescos preparados en casa sobre embutidos o bebidas oscuras, y mantén tu proteína en el rango seguro indicado por tu especialista.',
+      clinicalBasis: 'Guía KDIGO: el fósforo inorgánico de ultraprocesados se absorbe >90% frente a <50% del fósforo natural.',
+      actionType: 'none'
+    });
+  } else if (hasDiabetes) {
     immediateActions.push({
       id: 'act-clinical-ada',
       priority: 'Protocolo Médico ADA',
@@ -464,6 +576,16 @@ export function generateProactiveDailyRoadmap(userProfile = {}, workspace = {}, 
       title: 'Activa el escudo de fibra soluble en tu día',
       detail: `Hoy llevas ${ctx.consumed.fiber}g de fibra (meta: ${ctx.goals.fiber}g). Incluir avena, chía, lentejas o guayaba ayuda a capturar colesterol a nivel digestivo.`,
       clinicalBasis: 'Guía Cardiovascular AHA/OMS: 10–15g de fibra soluble diaria reducen significativamente el colesterol LDL.',
+      actionType: 'none'
+    });
+  } else if (hasThyroid) {
+    immediateActions.push({
+      id: 'act-clinical-ata',
+      priority: 'Protocolo Endocrino ATA',
+      category: 'Salud Tiroidea',
+      title: 'Separa tu medicación tiroidea del café y asegura selenio + proteína',
+      detail: 'Si tomas levotiroxina en ayunas, espera 45–60 min antes de tomar café o desayunar. Incluye huevo, pescado y semillas para aportar selenio y zinc.',
+      clinicalBasis: 'American Thyroid Association (ATA): el café y el calcio/hierro simultáneos reducen hasta un 40% la absorción de levotiroxina.',
       actionType: 'none'
     });
   } else {
@@ -516,6 +638,7 @@ export function generateProactiveDailyRoadmap(userProfile = {}, workspace = {}, 
     immediateActions,
     dayTimeline,
     protocols: ctx.protocols,
+    drugNutrientInteractions,
     context: ctx,
     profileAuditSummary: `Objetivo: ${userProfile?.goal || 'salud'} · Dieta: ${userProfile?.dietType || 'omnívora'}${
       (userProfile?.allergies || []).length ? ` · Alergias: ${userProfile.allergies.join(', ')}` : ''

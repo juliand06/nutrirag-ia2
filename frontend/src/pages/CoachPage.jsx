@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNutriStore } from '../store/useNutriStore';
 import { queryHybridRag, getInitialDocuments } from '../lib/nutriRagEngine';
 import { generateProactiveDailyRoadmap } from '../lib/proactiveAiEngine';
@@ -7,6 +7,7 @@ const QUICK_SUGGESTIONS = [
   '¿Qué debería comer en mi próxima comida según mi día de hoy?',
   'Cámbiame un ingrediente respetando mis alergias y gustos',
   '¿Cómo aplico mi protocolo clínico (ADA / DASH / OMS) hoy?',
+  '¿Cómo coordino mis comidas si tomo medicamentos (levotiroxina, metformina, losartán)?',
   'Opciones económicas de almuerzo y cena en mi ciudad'
 ];
 
@@ -19,6 +20,15 @@ export default function CoachPage() {
   const [input, setInput] = useState('');
   const [streamingText, setStreamingText] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  const streamIntervalRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (streamIntervalRef.current) {
+        clearInterval(streamIntervalRef.current);
+      }
+    };
+  }, []);
 
   const roadmap = generateProactiveDailyRoadmap(currentUser || {}, workspace || {});
   const ctx = roadmap.context;
@@ -51,11 +61,12 @@ export default function CoachPage() {
     let idx = 0;
 
     await new Promise(resolve => {
-      const interval = setInterval(() => {
+      streamIntervalRef.current = setInterval(() => {
         idx += 5;
         setStreamingText(words.slice(0, idx).join(' '));
         if (idx >= words.length) {
-          clearInterval(interval);
+          clearInterval(streamIntervalRef.current);
+          streamIntervalRef.current = null;
           resolve();
         }
       }, 28);
@@ -109,6 +120,22 @@ export default function CoachPage() {
         <div style={{ fontSize: '0.88rem', color: 'var(--text-secondary)' }}>
           <strong>Diagnóstico sin preguntar ({roadmap.timeWindowLabel}):</strong> Llevas {ctx.consumed.kcal} de {ctx.goals.kcal} kcal ({ctx.consumed.protein}g proteína y {ctx.waterGlassesToday} vasos de agua). Tu IA te sugiere para <strong>{roadmap.nextMealType}</strong>: <em>{roadmap.recommendedMeal.dishName}</em> ({roadmap.recommendedMeal.kcal} kcal · {roadmap.recommendedMeal.protein}g proteína).
         </div>
+        {roadmap.drugNutrientInteractions?.length > 0 && (
+          <div
+            style={{
+              marginTop: '4px',
+              padding: '8px 12px',
+              borderRadius: '10px',
+              backgroundColor: 'var(--bg-surface)',
+              fontSize: '0.82rem',
+              color: 'var(--text-secondary)',
+              borderLeft: '3px solid var(--accent-carrot)'
+            }}
+          >
+            <strong>Farmacovigilancia activa ({roadmap.drugNutrientInteractions[0].source}):</strong>{' '}
+            {roadmap.drugNutrientInteractions[0].interactionRule}
+          </div>
+        )}
       </div>
 
       {/* Sugerencias rápidas */}
@@ -129,6 +156,7 @@ export default function CoachPage() {
       {/* Historial de conversación */}
       <div
         className="ns-card ns-card-organic"
+        aria-live="polite"
         style={{
           padding: '22px',
           minHeight: '420px',

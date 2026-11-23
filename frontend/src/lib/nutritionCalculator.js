@@ -82,6 +82,39 @@ export const ACTIVITY_LEVELS = [
   }
 ];
 
+export function parseLocalizedNumber(val, fallback = 0) {
+  if (val === null || val === undefined || val === '') return fallback;
+  if (typeof val === 'number') return Number.isFinite(val) ? val : fallback;
+  const normalized = String(val).trim().replace(',', '.');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+export function getLocalTodayIso(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeClinicalText(str = '') {
+  return String(str || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function hasPositiveClinicalMatch(text, regex) {
+  const clean = normalizeClinicalText(text);
+  if (!clean) return false;
+  // Ignorar cláusulas negadas simples (ej. "no tengo anorexia ni bulimia", "sin embarazo")
+  const withoutNegations = clean.replace(
+    /\b(no\s+tengo|no\s+padezco|sin|nunca\s+tuve|descartado)\s+[a-z0-9_\s]+?(?=[,.;]|$)/g,
+    ' '
+  );
+  return regex.test(withoutNegations);
+}
+
 export function convertToMetric({
   heightUnit = 'cm',
   heightCm = 168,
@@ -91,20 +124,26 @@ export function convertToMetric({
   weightVal = 68,
   targetWeightVal = 64
 }) {
+  const rawCm = parseLocalizedNumber(heightCm, 168);
+  const rawFt = parseLocalizedNumber(heightFeet, 5);
+  const rawIn = parseLocalizedNumber(heightInches, 6);
+  const rawW = parseLocalizedNumber(weightVal, weightUnit === 'lb' ? 150 : 68);
+  const rawTW = parseLocalizedNumber(targetWeightVal, weightUnit === 'lb' ? 140 : rawW);
+
   const finalHeightCm =
     heightUnit === 'ft'
-      ? Math.round(((Number(heightFeet) || 5) * 12 + (Number(heightInches) || 0)) * 2.54)
-      : Math.round(Number(heightCm) || 168);
+      ? Math.round((rawFt * 12 + rawIn) * 2.54)
+      : Math.round(rawCm);
 
   const finalWeightKg =
     weightUnit === 'lb'
-      ? Number(((Number(weightVal) || 150) / 2.20462).toFixed(1))
-      : Number(Number(weightVal || 68).toFixed(1));
+      ? Number((rawW / 2.20462).toFixed(1))
+      : Number(rawW.toFixed(1));
 
   const finalTargetWeightKg =
     weightUnit === 'lb'
-      ? Number(((Number(targetWeightVal) || 140) / 2.20462).toFixed(1))
-      : Number(Number(targetWeightVal || finalWeightKg).toFixed(1));
+      ? Number((rawTW / 2.20462).toFixed(1))
+      : Number(rawTW.toFixed(1));
 
   return {
     heightCm: Math.max(110, Math.min(230, finalHeightCm)),
@@ -114,26 +153,35 @@ export function convertToMetric({
 }
 
 /**
- * Evalúa las reglas de seguridad obligatorias del onboarding:
- * - Menor de 18 años
- * - Embarazo o lactancia
- * - Antecedente o indicación de trastorno alimentario (TCA)
- * - Cálculo que daría menos de 1.200 kcal
+ * Evalúa las reglas de seguridad clínica obligatorias del onboarding:
+ * - Menor de 18 años (Mifflin-St Jeor solo aplica a adultos; modo educativo de hábitos)
+ * - Embarazo o lactancia (requiere superávit/micronutrientes supervisados)
+ * - Antecedente o indicación de trastorno de la conducta alimentaria (TCA)
+ * - Bajo peso actual (IMC < 18.5) o peso meta que llevaría a bajo peso (IMC meta < 18.5)
+ * - Cálculo que bajaría del piso clínico por sexo (1.200 kcal mujeres / 1.500 kcal hombres) o del BMR
  */
 export function buildPersonalizedNutritionSummary(onboardingData = {}) {
   const { heightCm, weightKg, targetWeightKg } = convertToMetric(onboardingData);
-  const age = Number(onboardingData.age) || 28;
+  const age = Math.max(10, Math.min(105, Math.round(parseLocalizedNumber(onboardingData.age, 28))));
   const sex = onboardingData.sex || 'femenino';
   const activityLevel = onboardingData.activityLevel || 'moderado';
   const rawGoal = onboardingData.goal || 'comer_saludable';
   const conditions = Array.isArray(onboardingData.healthConditions) ? onboardingData.healthConditions : [];
   const allergies = Array.isArray(onboardingData.allergies) ? onboardingData.allergies : [];
-  const customConditionText = `${onboardingData.customAllergy || ''} ${onboardingData.dislikedFoods || ''}`.toLowerCase();
+  const customConditionText = `${onboardingData.customAllergy || ''} ${onboardingData.dislikedFoods || ''} ${onboardingData.customCondition || ''}`;
+
+  const heightM = heightCm / 100;
+  const bmi = Number((weightKg / (heightM * heightM)).toFixed(1));
+  const targetBmi = Number((targetWeightKg / (heightM * heightM)).toFixed(1));
 
   const sexOffset = sex === 'masculino' ? 5 : sex === 'femenino' ? -161 : -78;
   const bmr = Math.round(10 * weightKg + 6.25 * heightCm - 5 * age + sexOffset);
   const actObj = ACTIVITY_LEVELS.find(a => a.id === activityLevel) || ACTIVITY_LEVELS[2];
   const tdee = Math.round(bmr * actObj.multiplier);
+
+  // Piso clínico diferenciado por sexo (ACSM / NIH / OMS)
+  const sexSafeFloorKcal =
+    sex === 'masculino' ? 1500 : sex === 'femenino' ? MIN_SAFE_DAILY_KCAL : 1350;
 
   const goalObj = ONBOARDING_GOALS.find(g => g.id === rawGoal) || ONBOARDING_GOALS[1];
   const rawSuggestedCalories = Math.round(tdee + goalObj.kcalDelta);
@@ -142,62 +190,109 @@ export function buildPersonalizedNutritionSummary(onboardingData = {}) {
   const isMinor = age < 18;
   const isPregnantOrLactating =
     conditions.includes('embarazo_lactancia') ||
-    /embaraz|lactan|gestaci/.test(customConditionText);
+    hasPositiveClinicalMatch(customConditionText, /\b(embaraz\w*|lactan\w*|gestaci\w*|posparto)\b/);
   const hasEatingDisorder =
     conditions.includes('tca') ||
-    /anorexia|bulimia|atracon|tca|trastorno aliment/.test(customConditionText);
-  const wouldBeUnder1200 = rawSuggestedCalories < MIN_SAFE_DAILY_KCAL;
+    hasPositiveClinicalMatch(
+      customConditionText,
+      /\b(anorexi\w*|bulimi\w*|atracon\w*|ortorexi\w*|arfid|purga\w*|tca|trastorno\s+aliment\w*)\b/
+    );
+  const isWantsDeficit = rawGoal === 'deficit_calorico' || rawGoal === 'control_condicion';
+  const isUnderweightNow = bmi < 18.5;
+  const isTargetUnderweight = targetBmi < 18.5 && targetWeightKg < weightKg;
+  const isUnderweightForDeficit = isWantsDeficit && (isUnderweightNow || isTargetUnderweight);
+  const wouldBeUnderFloor = rawSuggestedCalories < sexSafeFloorKcal;
 
   const safetyReasons = [];
   if (isMinor) {
-    safetyReasons.push('Eres menor de 18 años y tu cuerpo está en una etapa clave de crecimiento.');
+    safetyReasons.push('Eres menor de 18 años y tu cuerpo está en una etapa clave de desarrollo donde las fórmulas de restricción de adultos no aplican.');
   }
   if (isPregnantOrLactating) {
-    safetyReasons.push('Indicaste embarazo o lactancia, una etapa donde tus necesidades de energía y micronutrientes requieren guía médica personalizada.');
+    safetyReasons.push('Indicaste embarazo o lactancia, una etapa donde tus necesidades de energía, hierro, folato y calcio requieren guía médica personalizada.');
   }
   if (hasEatingDisorder) {
-    safetyReasons.push('Indicaste antecedentes o inquietudes sobre la relación con la comida, donde tu bienestar emocional y acompañamiento profesional van primero.');
+    safetyReasons.push('Indicaste antecedentes o inquietudes sobre la relación con la comida (TCA), donde tu bienestar integral y acompañamiento profesional van primero.');
   }
-  if (wouldBeUnder1200 && (rawGoal === 'deficit_calorico' || rawGoal === 'control_condicion')) {
-    safetyReasons.push('Un plan de reducción para tus datos bajaría de 1.200 kcal al día, lo cual no es seguro ni sostenible.');
+  if (isUnderweightForDeficit) {
+    safetyReasons.push(
+      isUnderweightNow
+        ? `Tu IMC actual (${bmi}) está en rango de bajo peso (< 18.5), por lo que un déficit calórico está clínicamente contraindicado.`
+        : `El peso meta indicado llevaría a un IMC de ${targetBmi} (< 18.5). Protegemos tu masa muscular y salud hormonal manteniendo un rango seguro.`
+    );
+  }
+  if (wouldBeUnderFloor && isWantsDeficit) {
+    safetyReasons.push(
+      `Un plan de reducción para tus datos bajaría del piso clínico seguro (${sexSafeFloorKcal} kcal/día), lo cual compromete micronutrientes y tasa metabólica.`
+    );
   }
 
   const safetyAdvisoryActive =
-    isMinor || isPregnantOrLactating || hasEatingDisorder || (wouldBeUnder1200 && rawGoal === 'deficit_calorico');
+    isMinor ||
+    isPregnantOrLactating ||
+    hasEatingDisorder ||
+    isUnderweightForDeficit ||
+    (wouldBeUnderFloor && isWantsDeficit);
 
-  // Si se activa la regla de seguridad, no mostramos plan de pérdida de peso: ofrecemos mantenimiento saludable (>= 1.200 kcal) y modo educativo
+  // Si se activa la regla de seguridad, no aplicamos déficit: ofrecemos energía de mantenimiento saludable (>= piso por sexo y >= BMR)
   const safeDailyCalories = safetyAdvisoryActive
-    ? Math.max(MIN_SAFE_DAILY_KCAL, tdee)
-    : Math.max(MIN_SAFE_DAILY_KCAL, rawSuggestedCalories);
+    ? Math.max(sexSafeFloorKcal, tdee)
+    : Math.max(sexSafeFloorKcal, bmr, rawSuggestedCalories);
 
   const effectiveGoalObj = safetyAdvisoryActive ? ONBOARDING_GOALS[3] : goalObj;
 
-  const targetCarbs = Math.round((safeDailyCalories * effectiveGoalObj.carbsRatio) / 4);
-  const targetProtein = Math.round((safeDailyCalories * effectiveGoalObj.proteinRatio) / 4);
-  const targetFat = Math.round((safeDailyCalories * effectiveGoalObj.fatRatio) / 9);
-  const waterGoalMl = Math.max(1750, Math.round(weightKg * 35));
-  const waterGlasses = Math.max(7, Math.round(waterGoalMl / 250));
+  // Ajuste clínico de proteína si hay condición renal (KDIGO: evitar sobrecarga proteica > 1.2g/kg sin orden médica)
+  const hasRenalCondition = conditions.some(c => normalizeClinicalText(c).includes('renal'));
+  const rawTargetProtein = Math.round((safeDailyCalories * effectiveGoalObj.proteinRatio) / 4);
+  const targetProtein = hasRenalCondition
+    ? Math.min(rawTargetProtein, Math.round(weightKg * 1.0))
+    : rawTargetProtein;
 
-  const heightM = heightCm / 100;
-  const bmi = Number((weightKg / (heightM * heightM)).toFixed(1));
+  const targetCarbs = Math.round((safeDailyCalories * effectiveGoalObj.carbsRatio) / 4);
+  const targetFat = Math.round((safeDailyCalories * effectiveGoalObj.fatRatio) / 9);
+
+  // Hidratación clínica: 35 ml/kg estándar (moderada en condición renal con nota de supervisión)
+  const waterGoalMl = hasRenalCondition
+    ? Math.min(2000, Math.max(1500, Math.round(weightKg * 28)))
+    : Math.max(1750, Math.round(weightKg * 35));
+  const waterGlasses = Math.max(6, Math.round(waterGoalMl / 250));
+
+  // Metas clínicas de micronutrientes basadas en OMS / ADA / AHA-DASH / KDIGO
+  const hasHypertension = conditions.some(c => normalizeClinicalText(c).includes('hiperten'));
+  const hasDiabetes = conditions.some(c => normalizeClinicalText(c).includes('diabet'));
+  const clinicalTargets = {
+    fiberGrams: Math.max(25, Math.min(38, Math.round((safeDailyCalories / 1000) * 14))),
+    sodiumMaxMg: hasHypertension || hasRenalCondition ? 1500 : 2000,
+    potassiumTargetMg: hasRenalCondition ? 2200 : hasHypertension ? 4200 : 3500,
+    proteinPerKg: Number((targetProtein / Math.max(1, weightKg)).toFixed(2)),
+    addedSugarMaxGrams: hasDiabetes ? 15 : 25,
+    omega3TargetMg: 1000
+  };
+
   const bmiExplanation =
     bmi < 18.5
-      ? 'Tu relación peso-estatura sugiere que tu cuerpo se beneficiará de platos nutritivos y densos en energía real.'
+      ? 'Tu relación peso-estatura indica que tu cuerpo se beneficiará de platos densos en nutrientes, proteína de calidad y grasas saludables sin recortes calóricos.'
       : bmi < 25
-        ? 'Tu relación peso-estatura está en un rango de equilibrio general; nos enfocaremos en calidad de alimentos y energía diaria.'
-        : 'Tu relación peso-estatura es solo un punto de partida orientativo (no mide músculo ni hábitos); iremos paso a paso con comida saciante y real.';
+        ? 'Tu relación peso-estatura está en un rango de equilibrio general; nos enfocaremos en calidad de alimentos, masa muscular y energía diaria.'
+        : 'Tu relación peso-estatura es solo un indicador orientativo (no distingue masa muscular de tejido adiposo); avanzaremos con saciedad y comida real.';
 
   const country = getCountryProfile(onboardingData.country || 'CO');
   const budget = getBudgetProfile(onboardingData.budgetTier || 'equilibrado');
 
+  // Peso meta seguro (nunca menor a IMC 18.5)
+  const minHealthyWeightKg = Number((18.5 * heightM * heightM).toFixed(1));
+  const safeTargetWeightKg = safetyAdvisoryActive
+    ? weightKg
+    : Math.max(minHealthyWeightKg, targetWeightKg);
+
   return {
     heightCm,
     weightKg,
-    targetWeightKg: safetyAdvisoryActive ? weightKg : targetWeightKg,
+    targetWeightKg: safeTargetWeightKg,
     age,
     sex,
     bmr,
     tdee,
+    sexSafeFloorKcal,
     rawSuggestedCalories,
     dailyCalories: safeDailyCalories,
     targetCarbs,
@@ -206,11 +301,14 @@ export function buildPersonalizedNutritionSummary(onboardingData = {}) {
     waterGoalMl,
     waterGlasses,
     bmi,
+    targetBmi,
     bmiExplanation,
+    clinicalTargets,
+    hideCalorieNumbersMode: isMinor || hasEatingDisorder,
     safetyAdvisoryActive,
     safetyReasons,
     safetyMessage: safetyAdvisoryActive
-      ? 'Por tu bienestar, no activamos un plan de pérdida de peso ni recorte calórico. Te recomendamos conversar con un nutricionista o médico de cabecera, y hemos configurado tu cuenta en modo de orientación educativa y alimentación equilibrada.'
+      ? 'Por tu bienestar clínico, no activamos un plan de pérdida de peso ni recorte calórico. Te recomendamos conversar con un nutricionista o médico de cabecera, y hemos configurado tu cuenta en modo de orientación educativa y alimentación equilibrada.'
       : null,
     countryName: country.name,
     countryFoods: country.foods.slice(0, 4),

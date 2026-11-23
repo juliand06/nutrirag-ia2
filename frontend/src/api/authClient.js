@@ -6,6 +6,7 @@
 
 import { apiFetch, setJwtTokens, clearJwtTokens, getAccessToken, getRefreshToken } from './client';
 import { computeRealSha256 } from '../services/userStorage';
+import { getLocalTodayIso } from '../lib/nutritionCalculator';
 
 const ACCOUNTS_INDEX_KEY = 'nutristudio_accounts_v4';
 const ACTIVE_PROFILE_KEY = 'nutristudio_active_profile_v4';
@@ -21,7 +22,12 @@ function generateSalt() {
 }
 
 async function deriveVerifier(password, salt) {
-  return computeRealSha256(`nutristudio-v4:${salt}:${password}`);
+  let hash = await computeRealSha256(`nutristudio-v4:${salt}:${password}`);
+  // Estiramiento iterativo de clave en cliente para reforzar el verificador local
+  for (let i = 0; i < 16; i += 1) {
+    hash = await computeRealSha256(`${hash}:${salt}:${i}`);
+  }
+  return hash;
 }
 
 function createSimulatedJwt(userId, email) {
@@ -161,7 +167,7 @@ export async function registerWithOnboarding({
     safetyAdvisoryActive: Boolean(computedPlan.safetyAdvisoryActive),
     safetyMessage: computedPlan.safetyMessage || null,
     profileConfigured: true,
-    createdAt: new Date().toISOString().slice(0, 10)
+    createdAt: getLocalTodayIso()
   };
 
   try {

@@ -19,6 +19,7 @@ const DESKTOP_LINKS = [
 
 export default function AppShell({ children }) {
   const navigate = useNavigate();
+  const [copilotMinimized, setCopilotMinimized] = React.useState(false);
   const currentUser = useNutriStore(s => s.currentUser);
   const workspace = useNutriStore(s => s.workspace);
   const themeMode = useNutriStore(s => s.themeMode);
@@ -214,34 +215,36 @@ export default function AppShell({ children }) {
         </header>
 
         <main className="ns-main-content">
-          {/* Franja de Copiloto Clínico Proactivo Omnipresente: guía sin necesidad de preguntar */}
+          {/* Franja de Copiloto Clínico Proactivo Omnipresente: guía sin necesidad de preguntar (minimizable en móvil) */}
           {topAction && (
             <div
               role="region"
               aria-label="Guía proactiva del día"
               className="ns-card ns-card-sage"
               style={{
-                padding: '12px 18px',
+                padding: copilotMinimized ? '8px 14px' : '12px 18px',
                 marginBottom: '22px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 flexWrap: 'wrap',
-                gap: '12px',
+                gap: '10px',
                 borderLeft: '4px solid var(--brand-leaf)'
               }}
             >
-              <div style={{ flex: '1 1 320px' }}>
-                <div style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--brand-leaf)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              <div style={{ flex: '1 1 280px' }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-leaf)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   Guía IA en vivo ({roadmap.timeWindowLabel}) · {roadmap.protocols[0]?.source}
                 </div>
-                <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
-                  {topAction.title}
-                </div>
+                {!copilotMinimized && (
+                  <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
+                    {topAction.title}
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                {topAction.actionType !== 'none' && (
+                {!copilotMinimized && topAction.actionType !== 'none' && (
                   <button
                     type="button"
                     onClick={handleExecuteTopAction}
@@ -250,9 +253,19 @@ export default function AppShell({ children }) {
                     {topAction.actionLabel}
                   </button>
                 )}
-                <NavLink to="/app/coach" className="ns-btn ns-btn-outline ns-btn-sm">
-                  Ver detalle clínico
-                </NavLink>
+                {!copilotMinimized && (
+                  <NavLink to="/app/coach" className="ns-btn ns-btn-outline ns-btn-sm">
+                    Ver detalle clínico
+                  </NavLink>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setCopilotMinimized(prev => !prev)}
+                  className="ns-btn ns-btn-ghost ns-btn-sm"
+                  aria-label={copilotMinimized ? 'Expandir guía clínica' : 'Minimizar guía clínica'}
+                >
+                  {copilotMinimized ? 'Mostrar guía' : 'Minimizar'}
+                </button>
               </div>
             </div>
           )}

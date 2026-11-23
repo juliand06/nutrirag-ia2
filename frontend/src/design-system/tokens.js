@@ -17,10 +17,10 @@ export const DESIGN_TOKENS = {
       leaf: '#1E5631',
       leafHover: '#164225',
       leafSoft: '#E3EFE6',
-      carrot: '#D95D24',
-      carrotHover: '#BA4B18',
+      carrot: '#B84714',
+      carrotHover: '#9A3A0E',
       carrotSoft: '#FDF0E8',
-      earth: '#8C5A3C',
+      earth: '#7A4E33',
       earthSoft: '#F5EBE4',
       // Compatibilidad con componentes existentes
       bgPage: '#FAF6F0',

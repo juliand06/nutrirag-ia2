@@ -134,46 +134,63 @@ export default function ProgressPage() {
         </div>
       </div>
 
-      {/* PRONÓSTICO IA A 30 DÍAS + CHECK-IN METABÓLICO ADAPTATIVO (MACROFACTOR STYLE) */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-          gap: '18px',
-          marginBottom: '24px'
-        }}
-      >
-        <section className="ns-card ns-card-sage">
+      {/* PRONÓSTICO IA A 30 DÍAS + CHECK-IN METABÓLICO ADAPTATIVO (CON MODO PROTEGIDO SIN PRESIÓN DE PESO SI HAY ALERTA CLÍNICA) */}
+      {currentUser?.safetyAdvisoryActive ? (
+        <section
+          className="ns-card ns-card-sage"
+          style={{ marginBottom: '24px', borderLeft: '4px solid var(--brand-leaf)' }}
+        >
           <span style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--brand-leaf)', textTransform: 'uppercase' }}>
-            Pronóstico Corporal IA a 30 días
+            Modo de Acompañamiento Clínico y Bienestar (Sin Presión Numérica)
           </span>
-          <h2 style={{ fontSize: '1.22rem', margin: '6px 0 8px' }}>{aiProgress.forecastTitle}</h2>
-          <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-            {aiProgress.forecastDetail}
+          <h2 style={{ fontSize: '1.22rem', margin: '6px 0 8px' }}>
+            Enfoque en variedad nutricional, energía estable y hábitos sostenibles
+          </h2>
+          <p style={{ margin: 0, fontSize: '0.92rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+            Por tu perfil de cuidado clínico, ocultamos proyecciones de pérdida de peso y recortes calóricos automáticos. Tu éxito se mide por la calidad de tus platos reales, tu hidratación y cómo te sientes de energía cada día.
           </p>
         </section>
-
-        <section className="ns-card ns-card-warm" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '12px' }}>
-          <div>
-            <span style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--accent-earth)', textTransform: 'uppercase' }}>
-              Motor Metabólico Adaptativo
+      ) : (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+            gap: '18px',
+            marginBottom: '24px'
+          }}
+        >
+          <section className="ns-card ns-card-sage">
+            <span style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--brand-leaf)', textTransform: 'uppercase' }}>
+              Pronóstico Corporal IA a 30 días
             </span>
-            <h2 style={{ fontSize: '1.22rem', margin: '6px 0 8px' }}>{adaptiveCheckIn.headline}</h2>
+            <h2 style={{ fontSize: '1.22rem', margin: '6px 0 8px' }}>{aiProgress.forecastTitle}</h2>
             <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-              {adaptiveCheckIn.explanation}
+              {aiProgress.forecastDetail}
             </p>
-          </div>
-          {adaptiveCheckIn.ready && adaptiveCheckIn.deltaKcal !== 0 && (
-            <button
-              type="button"
-              onClick={handleApplyAdaptiveCalories}
-              className="ns-btn ns-btn-leaf ns-btn-sm"
-            >
-              Aplicar ajuste sugerido ({adaptiveCheckIn.suggestedCalories} kcal/día)
-            </button>
-          )}
-        </section>
-      </div>
+          </section>
+
+          <section className="ns-card ns-card-warm" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '12px' }}>
+            <div>
+              <span style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--accent-earth)', textTransform: 'uppercase' }}>
+                Motor Metabólico Adaptativo
+              </span>
+              <h2 style={{ fontSize: '1.22rem', margin: '6px 0 8px' }}>{adaptiveCheckIn.headline}</h2>
+              <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                {adaptiveCheckIn.explanation}
+              </p>
+            </div>
+            {adaptiveCheckIn.ready && adaptiveCheckIn.deltaKcal !== 0 && (
+              <button
+                type="button"
+                onClick={handleApplyAdaptiveCalories}
+                className="ns-btn ns-btn-leaf ns-btn-sm"
+              >
+                Aplicar ajuste sugerido ({adaptiveCheckIn.suggestedCalories} kcal/día)
+              </button>
+            )}
+          </section>
+        </div>
+      )}
 
       {/* Gráficas de Peso y Calorías/Macros */}
       <div

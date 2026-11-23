@@ -1,11 +1,13 @@
 import { create } from 'zustand';
 import i18n from '../i18n';
 import { getStoredSessionProfile, saveStoredSessionProfile, logoutSession } from '../api/authClient';
-import { buildPersonalizedNutritionSummary } from '../lib/nutritionCalculator';
+import { buildPersonalizedNutritionSummary, getLocalTodayIso, parseLocalizedNumber } from '../lib/nutritionCalculator';
 import { generateWeeklyPlan } from '../lib/mealPlanner';
 
 const ONBOARDING_DRAFT_KEY = 'nutristudio_onboarding_draft_v4';
 const WORKSPACE_KEY_PREFIX = 'nutristudio_ws_v4_';
+const MAX_PERSISTED_CHAT_MESSAGES = 80;
+const MAX_PERSISTED_MEAL_LOGS = 400;
 
 export const DEFAULT_ONBOARDING_DRAFT = {
   step: 1,
@@ -45,7 +47,7 @@ function loadOnboardingDraft() {
 }
 
 function getTodayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return getLocalTodayIso();
 }
 
 function loadWorkspaceForUser(user) {
@@ -97,7 +99,20 @@ function loadWorkspaceForUser(user) {
 
 function persistWorkspace(userId, ws) {
   if (!userId || !ws) return;
-  localStorage.setItem(WORKSPACE_KEY_PREFIX + userId, JSON.stringify(ws));
+  try {
+    const trimmed = {
+      ...ws,
+      chatMessages: Array.isArray(ws.chatMessages)
+        ? ws.chatMessages.slice(-MAX_PERSISTED_CHAT_MESSAGES)
+        : [],
+      mealLogs: Array.isArray(ws.mealLogs)
+        ? ws.mealLogs.slice(0, MAX_PERSISTED_MEAL_LOGS)
+        : []
+    };
+    localStorage.setItem(WORKSPACE_KEY_PREFIX + userId, JSON.stringify(trimmed));
+  } catch {
+    // Evitar caída por QuotaExceededError en dispositivos con almacenamiento lleno
+  }
 }
 
 export const useNutriStore = create((set, get) => {
@@ -315,9 +330,10 @@ export const useNutriStore = create((set, get) => {
     appendChatMessage: (msg) =>
       set(state => {
         if (!state.currentUser || !state.workspace) return {};
+        const nextMessages = [...(state.workspace.chatMessages || []), msg].slice(-MAX_PERSISTED_CHAT_MESSAGES);
         const nextWs = {
           ...state.workspace,
-          chatMessages: [...(state.workspace.chatMessages || []), msg]
+          chatMessages: nextMessages
         };
         persistWorkspace(state.currentUser.id, nextWs);
         return { workspace: nextWs };
@@ -326,7 +342,7 @@ export const useNutriStore = create((set, get) => {
     addWeightLog: (weightKg, note = '') =>
       set(state => {
         if (!state.currentUser || !state.workspace) return {};
-        const w = Number(weightKg);
+        const w = parseLocalizedNumber(weightKg, 0);
         if (!w || w < 25 || w > 300) return {};
         const entry = {
           id: `w-${Date.now()}`,

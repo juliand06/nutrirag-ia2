@@ -60,11 +60,77 @@ export const MEDICAL_CONDITIONS = [
   },
   {
     id: 'salud_renal_kdigo',
-    label: 'Protección renal / Control de sodio y fósforo',
+    label: 'Protección renal / Control de sodio, potasio y fósforo',
     source: 'Guía Clínica KDIGO (Kidney Disease: Improving Global Outcomes)',
     keyRules:
-      'Limita sodio (<2,000 mg/día), evita aditivos fosfatados de ultraprocesados, prioriza proteína de alta calidad ajustada por médico/nutricionista y mantén hidratación supervisada.',
-    alertRule: 'Evitar suplementos proteicos excesivos sin indicación nefrológica y bebidas cola/embutidos.'
+      'Limita sodio (<1,500–2,000 mg/día), evita aditivos fosfatados inorgánicos de ultraprocesados, modula proteína (0.8–1.0 g/kg/día salvo indicación de diálisis) y mantén hidratación y potasio supervisados por nefrología.',
+    alertRule: 'Precedencia clínica máxima: no aplicar dietas hiperproteicas deportivas (ISSN) ni suplementos de potasio sin aval nefrológico.'
+  },
+  {
+    id: 'hipotiroidismo_metabolico',
+    label: 'Hipotiroidismo / Salud tiroidea y metabólica',
+    source: 'Guía Clínica ATA / ETA (American & European Thyroid Association)',
+    keyRules:
+      'Asegura aporte óptimo de selenio, zinc y hierro con alimentos reales (huevo, pescado, legumbres, semillas), prioriza proteína saciante para proteger tasa metabólica basal y consume crucíferas (brócoli, coliflor) preferiblemente cocidas al vapor.',
+    alertRule: 'Si tomas levotiroxina en ayunas, sepárala 45–60 min del café, leche de soya, fibra concentrada o suplementos de calcio/hierro.'
+  },
+  {
+    id: 'sop_endocrino',
+    label: 'Síndrome de Ovario Poliquístico (SOP) / Equilibrio hormonal',
+    source: 'Consenso Internacional ESHRE / ASRM de SOP y Nutrición Endocrina',
+    keyRules:
+      'Combina control de carga glucémica (desayuno salado rico en proteína ≥25g), fuentes naturales de mio-inositol (legumbres, cítricos enteros, semillas), ácidos grasos Omega-3 antiinflamatorios y fibra prebiótica.',
+    alertRule: 'Evitar desayunos basados en azúcares líquidos o harinas blancas que disparan la hiperinsulinemia ovárica.'
+  },
+  {
+    id: 'enfermedad_celiaca_gluten',
+    label: 'Enfermedad celíaca / Sensibilidad al gluten',
+    source: 'Guía Clínica WGO / ESPGHAN de Celiaquía y Gastroenterología',
+    keyRules:
+      'Exclusión estricta de trigo, cebada, centeno y derivados (TACC). Prioriza carbohidratos naturalmente libres de gluten de alta densidad nutricional: quinua, amaranto, arroz integral, maíz nixtamalizado, yuca, papa y plátano.',
+    alertRule: 'Vigilar trazas por contaminación cruzada en avena no certificada, salsas comerciales y empanizados.'
+  }
+];
+
+/**
+ * Base de Farmacovigilancia Alimento-Medicamento (Interacciones Clínicas Relevantes)
+ * Permite a la IA advertir proactivamente cómo coordinar horarios de comidas con tratamientos comunes.
+ */
+export const CLINICAL_DRUG_NUTRIENT_INTERACTIONS = [
+  {
+    conditionId: 'resistencia_insulina_diabetes',
+    medications: 'Metformina, Insulina o Sulfonilureas (Glibenclamida, Glimepirida)',
+    interactionRule:
+      'Con metformina: tómala junto con las comidas para reducir molestias gastrointestinales y vigila niveles de Vitamina B12 (huevo, pescado, carnes magras). Si usas insulina o sulfonilureas: no omitas comidas ni elimines de golpe todos los carbohidratos complejos para prevenir hipoglucemia (<70 mg/dL).',
+    source: 'Farmacovigilancia Clínica ADA / FDA'
+  },
+  {
+    conditionId: 'hipertension_cardiovascular',
+    medications: 'IECA (Enalapril), ARA-II (Losartán, Valsartán) o Espironolactona',
+    interactionRule:
+      'Evita las "sales dietéticas" de supermercado a base de cloruro de potasio sin consultar a tu médico, ya que estos fármacos retienen potasio. Sazona con hierbas aromáticas, ajo, cebolla y limón natural.',
+    source: 'Guía Farmacológica AHA / ACC'
+  },
+  {
+    conditionId: 'colesterol_trigliceridos',
+    medications: 'Estatinas (Atorvastatina, Simvastatina, Rosuvastatina) o Anticoagulantes (Warfarina)',
+    interactionRule:
+      'Con atorvastatina/simvastatina: evita el jugo de toronja (pomelo) porque inhibe la enzima CYP3A4. Si tomas warfarina: mantén una porción diaria constante de vegetales verdes (espinaca, brócoli) sin hacer cambios drásticos de un día para otro en tu ingesta de Vitamina K.',
+    source: 'Consenso Clínico AHA / ESC de Lípidos y Anticoagulación'
+  },
+  {
+    conditionId: 'hipotiroidismo_metabolico',
+    medications: 'Levotiroxina sódica',
+    interactionRule:
+      'Tómala con agua pura 45 a 60 minutos antes del desayuno. El café expreso, el salvado de fibra, la soya y los suplementos de calcio o hierro reducen su absorción intestinal hasta en un 40% si se toman al mismo tiempo.',
+    source: 'American Thyroid Association (ATA)'
+  },
+  {
+    conditionId: 'anemia_fatiga',
+    medications: 'Sulfato ferroso / Hierro oral',
+    interactionRule:
+      'Acompáñalo con vitamina C natural (guayaba, naranja, limonada sin azúcar) y sepáralo 2 horas de lácteos, café o té negro/verde, cuyos fitatos, taninos y calcio bloquean el transportador intestinal DMT1.',
+    source: 'Guía OMS de Suplementación y Absorción de Hierro'
   }
 ];
 
@@ -206,6 +272,40 @@ export const GLOBAL_MEDICAL_RAG_DOCUMENTS = [
         tokenCount: 540,
         content:
           'La crononutrición demuestra que la sensibilidad a la insulina es mayor durante las primeras horas del día y disminuye en la noche. Concentrar mayor proporción calórica y carbohidratos complejos en desayuno y almuerzo, manteniendo cenas ligeras 2–3 horas antes de dormir, mejora la glucemia, la calidad del sueño y la recomposición corporal.'
+      }
+    ]
+  },
+  {
+    id: 'doc-global-farmaco-nutriente-endocrino',
+    tenantId: 'reference',
+    ownerUsername: 'sistema',
+    fileName: 'Guia_Farmacovigilancia_Nutricional_Endocrino_ATA_ESHRE.pdf',
+    sha256Hash: 'global-med-farmaco-ata-eshre-2026',
+    totalPages: 4,
+    totalChunks: 2,
+    ocrApplied: false,
+    embeddingModel: 'text-embedding-004',
+    tempFileDeleted: true,
+    indexingStatus: 'INDEXED',
+    createdAt: '2026-11-23',
+    chunks: [
+      {
+        id: 'chk-farmaco-1',
+        pageNumber: 1,
+        sectionTitle: 'Interacciones Fármaco-Nutriente: Levotiroxina, Metformina, IECA/ARA-II y Warfarina',
+        chunkOrder: 1,
+        tokenCount: 620,
+        content:
+          'En hipotiroidismo (ATA), la levotiroxina debe tomarse en ayunas con agua y separarse 45–60 minutos de café, soya, fibra alta, calcio o hierro. En hipertensión tratada con IECA (enalapril) o ARA-II (losartán), se deben evitar sustitutos de sal con cloruro de potasio por riesgo de hiperpotasemia. En diabetes con metformina, se vigila la vitamina B12; con insulina o sulfonilureas nunca se omiten comidas para prevenir hipoglucemia (<70 mg/dL). Con warfarina se mantiene estable la porción diaria de hojas verdes ricas en vitamina K.'
+      },
+      {
+        id: 'chk-endocrino-2',
+        pageNumber: 3,
+        sectionTitle: 'Nutrición en SOP (ESHRE), Celiaquía (WGO) y Prevención de Sarcopenia (ESPEN)',
+        chunkOrder: 2,
+        tokenCount: 580,
+        content:
+          'En Síndrome de Ovario Poliquístico (SOP), iniciar el día con desayuno salado proteico (≥25–30g proteína), fuentes naturales de mio-inositol (legumbres, semillas, cítricos enteros) y Omega-3 mejora la resistencia a la insulina y la ovulación. En enfermedad celíaca se excluye trigo, cebada y centeno (TACC), priorizando quinua, amaranto, maíz nixtamalizado, arroz integral y tubérculos locales.'
       }
     ]
   }

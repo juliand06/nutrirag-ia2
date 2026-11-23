@@ -10,12 +10,19 @@ import LandingPage from '../pages/LandingPage';
 import ProtectedRoute from '../components/layout/ProtectedRoute';
 import NutritionistPortalSection from '../components/NutritionistPortalSection';
 import BillingPrivacyObservabilitySection from '../components/BillingPrivacyObservabilitySection';
-import { buildPersonalizedNutritionSummary } from '../lib/nutritionCalculator';
+import {
+  buildPersonalizedNutritionSummary,
+  parseLocalizedNumber,
+  getLocalTodayIso
+} from '../lib/nutritionCalculator';
 import {
   generateProactiveDailyRoadmap,
   evaluateFoodPersonalCompatibility,
-  getSafeFoodsForUser
+  getSafeFoodsForUser,
+  resolveUserClinicalProtocols,
+  resolveDrugNutrientInteractions
 } from '../lib/proactiveAiEngine';
+import { evaluateAcuteMedicalEmergency, queryHybridRag } from '../lib/nutriRagEngine';
 import { GLOBAL_FOOD_DATABASE } from '../lib/foodDatabase';
 import {
   registerWithOnboarding,
@@ -143,6 +150,97 @@ describe('NutriStudio AI — Reconstrucción Editorial + Suite Completa', () => 
       healthConditions: ['tca']
     });
     expect(tcaPlan.safetyAdvisoryActive).toBe(true);
+  });
+
+  it('valida bordes clínicos avanzados: tildes en TCA, negaciones, bajo peso (IMC < 18.5), piso por sexo (1500/1200) y coma decimal', () => {
+    expect(parseLocalizedNumber('67,5')).toBeCloseTo(67.5, 1);
+    expect(getLocalTodayIso(new Date(2026, 10, 23, 21, 30))).toBe('2026-11-23');
+
+    // Detección de "atracón" con tilde activa seguridad
+    const atraconWithAccent = buildPersonalizedNutritionSummary({
+      goal: 'deficit_calorico',
+      age: 28,
+      heightCm: 165,
+      weightVal: '64,5',
+      customCondition: 'Episodios de atracón nocturno'
+    });
+    expect(atraconWithAccent.safetyAdvisoryActive).toBe(true);
+
+    // Negación simple ("no tengo anorexia") NO debe activar falso positivo
+    const negativeStatement = buildPersonalizedNutritionSummary({
+      goal: 'deficit_calorico',
+      age: 28,
+      heightCm: 165,
+      weightVal: 68,
+      targetWeightVal: 63,
+      customCondition: 'no tengo anorexia ni bulimia'
+    });
+    expect(negativeStatement.safetyAdvisoryActive).toBe(false);
+
+    // Bajo peso actual (IMC < 18.5) bloquea déficit calórico
+    const underweightDeficit = buildPersonalizedNutritionSummary({
+      goal: 'deficit_calorico',
+      age: 26,
+      heightCm: 170,
+      weightVal: 50,
+      targetWeightVal: 47
+    });
+    expect(underweightDeficit.bmi).toBeLessThan(18.5);
+    expect(underweightDeficit.safetyAdvisoryActive).toBe(true);
+
+    // Piso calórico masculino >= 1500 kcal y control_condicion incluido en safetyAdvisoryActive
+    const maleLowFloor = buildPersonalizedNutritionSummary({
+      goal: 'control_condicion',
+      sex: 'masculino',
+      age: 65,
+      heightCm: 158,
+      weightVal: 52,
+      activityLevel: 'sedentario'
+    });
+    expect(maleLowFloor.dailyCalories).toBeGreaterThanOrEqual(1500);
+    expect(maleLowFloor.clinicalTargets.fiberGrams).toBeGreaterThanOrEqual(25);
+  });
+
+  it('aplica jerarquía renal KDIGO sobre hipertrofia ISSN, protege frutas enteras NOVA 1 en diabetes (ADA) y activa farmacovigilancia + urgencias', async () => {
+    // 1. Precedencia clínica: paciente con objetivo masa_muscular pero condición renal -> prioriza KDIGO sobre ISSN
+    const renalAthleteProtocols = resolveUserClinicalProtocols({
+      goal: 'masa_muscular',
+      healthConditions: ['renal', 'tiroides']
+    });
+    expect(renalAthleteProtocols[0].id).toBe('salud_renal_kdigo');
+    expect(renalAthleteProtocols.some(p => p.id === 'rendimiento_deportivo')).toBe(false);
+    expect(renalAthleteProtocols.some(p => p.id === 'hipotiroidismo_metabolico')).toBe(true);
+
+    const drugInteractions = resolveDrugNutrientInteractions(renalAthleteProtocols);
+    expect(drugInteractions.some(d => d.medications.toLowerCase().includes('levotiroxina'))).toBe(true);
+
+    // 2. En diabetes (ADA), fruta entera fresca NOVA 1 (banano) es 'optimal', mientras que gaseosa NOVA 4 es 'caution'
+    const diabeticProfile = {
+      healthConditions: ['diabetes'],
+      allergies: ['Mariscos / Pescado', 'Maní / Frutos secos']
+    };
+    const banano = GLOBAL_FOOD_DATABASE.find(f => f.id === 'fd-banano');
+    const gaseosa = GLOBAL_FOOD_DATABASE.find(f => f.id === 'fd-gaseosa');
+    expect(evaluateFoodPersonalCompatibility(banano, diabeticProfile).level).toBe('optimal');
+    expect(evaluateFoodPersonalCompatibility(gaseosa, diabeticProfile).level).toBe('caution');
+
+    // Sinónimos de alérgenos (camarón y cacahuate)
+    const camaronFood = { name: 'Ceviche de camarón y langostino', category: 'Proteínas', novaGroup: 1 };
+    const cacahuateFood = { name: 'Crema de cacahuate artesanal', category: 'Grasas Saludables', novaGroup: 1 };
+    expect(evaluateFoodPersonalCompatibility(camaronFood, diabeticProfile).compatible).toBe(false);
+    expect(evaluateFoodPersonalCompatibility(cacahuateFood, diabeticProfile).compatible).toBe(false);
+
+    // 3. Guardrail de emergencia médica aguda (hipoglucemia <70 mg/dL y dolor torácico)
+    const hypoEmergency = evaluateAcuteMedicalEmergency('Tengo temblor y glucosa en 54 mg/dL');
+    expect(hypoEmergency.isEmergency).toBe(true);
+    expect(hypoEmergency.answer).toMatch(/Regla 15-15 ADA/i);
+
+    const chestEmergency = await queryHybridRag({
+      question: 'Tengo dolor de pecho fuerte y falta de aire',
+      userProfile: diabeticProfile
+    });
+    expect(chestEmergency.guardrailTriggered).toBe(true);
+    expect(chestEmergency.emergencyCategory).toBe('URGENCIA_MEDICA_AGUDA');
   });
 
   it('registra y autentica con authClient sin guardar nunca la contraseña en localStorage', async () => {

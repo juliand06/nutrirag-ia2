@@ -43,9 +43,14 @@ const ALLERGY_OPTIONS = [
 
 const HEALTH_CONDITIONS = [
   { id: 'ninguna', label: 'Ninguna en particular' },
-  { id: 'diabetes', label: 'Azúcar alta / Prediabetes o Diabetes tipo 2' },
-  { id: 'hipertension', label: 'Presión arterial alta (Hipertensión)' },
-  { id: 'colesterol', label: 'Colesterol o triglicéridos altos' },
+  { id: 'diabetes', label: 'Azúcar alta / Resistencia a la insulina o Diabetes tipo 2 (ADA)' },
+  { id: 'hipertension', label: 'Presión arterial alta / Hipertensión (DASH)' },
+  { id: 'colesterol', label: 'Colesterol LDL, triglicéridos o hígado graso (AHA / EASL)' },
+  { id: 'tiroides', label: 'Hipotiroidismo / Salud tiroidea (ATA)' },
+  { id: 'sop', label: 'Síndrome de Ovario Poliquístico — SOP (ESHRE)' },
+  { id: 'gastritis', label: 'Gastritis, reflujo o colon irritable' },
+  { id: 'anemia', label: 'Anemia por falta de hierro o fatiga frecuente (OMS)' },
+  { id: 'renal', label: 'Cuidado renal / Control de sodio y proteína (KDIGO)' },
   { id: 'embarazo_lactancia', label: 'Estoy en embarazo o lactancia' },
   { id: 'tca', label: 'Tengo o he tenido una relación difícil con la comida (TCA)' },
   { id: 'prefiero_no_decir', label: 'Prefiero no decir' }
@@ -345,6 +350,25 @@ export default function OnboardingPage() {
                 </div>
               </div>
             </div>
+
+            {/* Metas clínicas de micronutrientes y biomarcadores */}
+            {summary.clinicalTargets && (
+              <div
+                className="ns-card ns-card-sage"
+                style={{ marginBottom: '20px', padding: '18px 20px' }}
+              >
+                <h3 style={{ fontSize: '1.08rem', marginBottom: '8px', color: 'var(--brand-leaf)' }}>
+                  Parámetros Clínicos de Precisión (OMS · ADA · AHA/DASH)
+                </h3>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', fontSize: '0.86rem' }}>
+                  <span className="ns-chip">Fibra meta: ≥{summary.clinicalTargets.fiberGrams} g/día</span>
+                  <span className="ns-chip">Sodio máx: &lt;{summary.clinicalTargets.sodiumMaxMg} mg/día</span>
+                  <span className="ns-chip">Potasio meta: {summary.clinicalTargets.potassiumTargetMg} mg/día</span>
+                  <span className="ns-chip">Densidad proteica: {summary.clinicalTargets.proteinPerKg} g/kg/día</span>
+                  <span className="ns-chip">Omega-3 meta: ≥{summary.clinicalTargets.omega3TargetMg} mg/día</span>
+                </div>
+              </div>
+            )}
 
             {/* Alimentos locales recomendados según su país */}
             <div
@@ -1058,8 +1082,8 @@ export default function OnboardingPage() {
           )}
         </div>
 
-        {/* Botón de avanzar */}
-        <div style={{ marginTop: '32px', paddingTop: '18px', borderTop: '1px solid var(--border-warm)' }}>
+        {/* Botón de avanzar + opción de ir directo al resumen desde el paso 7 */}
+        <div style={{ marginTop: '32px', paddingTop: '18px', borderTop: '1px solid var(--border-warm)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <button
             type="button"
             onClick={handleNext}
@@ -1068,6 +1092,19 @@ export default function OnboardingPage() {
           >
             {step === TOTAL_STEPS ? 'Armar mi plan personalizado →' : 'Continuar →'}
           </button>
+          {step >= 7 && step < TOTAL_STEPS && (
+            <button
+              type="button"
+              onClick={() => {
+                setBuildingMessageIdx(0);
+                setPhase('building');
+              }}
+              className="ns-btn ns-btn-ghost ns-btn-sm"
+              style={{ alignSelf: 'center' }}
+            >
+              Completar el resto después y ver mi resumen ahora →
+            </button>
+          )}
         </div>
       </div>
 
