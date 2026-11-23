@@ -14,12 +14,13 @@ export default defineConfig({
         'landing-wellness.webp'
       ],
       manifest: {
-        name: 'NutriStudio AI — Nutrición y Bienestar',
+        name: 'NutriStudio AI — Come mejor sin complicarte la vida',
         short_name: 'NutriStudio',
-        description: 'Plataforma inteligente de nutrición, escáner de alimentos, seguimiento diario y bienestar.',
-        theme_color: '#0d8a68',
-        background_color: '#edf7f2',
+        description: 'Planificación de comidas reales de tu país, educación nutricional clara y coach con IA.',
+        theme_color: '#1E5631',
+        background_color: '#FAF6F0',
         display: 'standalone',
+        orientation: 'portrait',
         lang: 'es',
         icons: [
           {

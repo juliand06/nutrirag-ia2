@@ -11,11 +11,13 @@ yarn-error.log*
 *.env
 !.env.example
 
-# Node / Frontend
+# Node / Frontend / Netlify
 node_modules/
 dist/
 dist-ssr/
 *.local
+.netlify/
+.netlify
 
 # Python
 __pycache__/
