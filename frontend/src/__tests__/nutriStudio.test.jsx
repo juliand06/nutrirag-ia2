@@ -20,10 +20,15 @@ import {
   evaluateFoodPersonalCompatibility,
   getSafeFoodsForUser,
   resolveUserClinicalProtocols,
-  resolveDrugNutrientInteractions
+  resolveDrugNutrientInteractions,
+  analyzeDayClinicalMetrics
 } from '../lib/proactiveAiEngine';
-import { evaluateAcuteMedicalEmergency, queryHybridRag } from '../lib/nutriRagEngine';
-import { GLOBAL_FOOD_DATABASE } from '../lib/foodDatabase';
+import {
+  evaluateAcuteMedicalEmergency,
+  queryHybridRag,
+  sanitizeRagAnswerForUser
+} from '../lib/nutriRagEngine';
+import { GLOBAL_FOOD_DATABASE, scaleFoodPortion as scaleLibFoodPortion } from '../lib/foodDatabase';
 import {
   registerWithOnboarding,
   loginWithEmail,
@@ -241,6 +246,62 @@ describe('NutriStudio AI — Reconstrucción Editorial + Suite Completa', () => 
     });
     expect(chestEmergency.guardrailTriggered).toBe(true);
     expect(chestEmergency.emergencyCategory).toBe('URGENCIA_MEDICA_AGUDA');
+
+    // 4. Sanitizador post-RAG contra alérgenos/disgustos y redistribución calórica renal + geriatría
+    const veganNoSoyProfile = {
+      dietType: 'vegana',
+      allergies: ['Soya'],
+      dislikedFoods: 'brócoli'
+    };
+    const sanitized = sanitizeRagAnswerForUser(
+      'Te recomiendo pechuga de pollo con yogur griego y brócoli al vapor.',
+      veganNoSoyProfile,
+      { dishName: 'Lentejas con quinua y aguacate' }
+    );
+    expect(sanitized.toLowerCase()).not.toContain('pechuga de pollo');
+    expect(sanitized.toLowerCase()).not.toContain('yogur griego');
+    expect(sanitized.toLowerCase()).not.toContain('brócoli');
+
+    // Redistribución calórica en condición renal (KDIGO) evita déficit oculto
+    const renalSummary = buildPersonalizedNutritionSummary({
+      goal: 'control_condicion',
+      sex: 'femenino',
+      age: 48,
+      heightCm: 162,
+      weightVal: 60,
+      healthConditions: ['renal']
+    });
+    expect(renalSummary.targetProtein).toBeLessThanOrEqual(60);
+    const totalMacroKcal =
+      renalSummary.targetProtein * 4 + renalSummary.targetCarbs * 4 + renalSummary.targetFat * 9;
+    expect(Math.abs(totalMacroKcal - renalSummary.dailyCalories)).toBeLessThan(45);
+
+    // Protección geriátrica de sarcopenia (age >= 65: IMC < 22.0 bloquea déficit y garantiza >= 1.2 g/kg proteína)
+    const seniorPlan = buildPersonalizedNutritionSummary({
+      goal: 'deficit_calorico',
+      sex: 'masculino',
+      age: 72,
+      heightCm: 170,
+      weightVal: 62
+    });
+    expect(seniorPlan.bmi).toBeLessThan(22.0);
+    expect(seniorPlan.safetyAdvisoryActive).toBe(true);
+    expect(seniorPlan.targetProtein).toBeGreaterThanOrEqual(Math.round(62 * 1.2));
+
+    // Biomarcadores del día en analyzeDayClinicalMetrics (Carga glucémica, Na/K, Hierro+VitC, Omega-3)
+    const lentejas = scaleLibFoodPortion(GLOBAL_FOOD_DATABASE.find(f => f.id === 'fd-lentejas'), 150);
+    const guayaba = scaleLibFoodPortion(GLOBAL_FOOD_DATABASE.find(f => f.id === 'fd-guayaba'), 120);
+    const dayAnalysis = analyzeDayClinicalMetrics({
+      dayLogs: [
+        { mealType: 'Almuerzo', foodId: 'fd-lentejas', grams: 150, ...lentejas },
+        { mealType: 'Almuerzo', foodId: 'fd-guayaba', grams: 120, ...guayaba }
+      ],
+      userProfile: renalSummary
+    });
+    expect(dayAnalysis.totals.ironMg).toBeGreaterThan(4);
+    expect(dayAnalysis.totals.vitaminCMg).toBeGreaterThan(200);
+    expect(dayAnalysis.ironSynergyActive).toBe(true);
+    expect(dayAnalysis.totals.glycemicLoad).toBeGreaterThan(0);
   });
 
   it('registra y autentica con authClient sin guardar nunca la contraseña en localStorage', async () => {

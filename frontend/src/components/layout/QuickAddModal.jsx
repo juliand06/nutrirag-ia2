@@ -1,31 +1,44 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useNutriStore } from '../../store/useNutriStore';
 import { GLOBAL_FOOD_DATABASE, scaleFoodPortion } from '../../lib/foodDatabase';
+import { getSafeFoodsForUser } from '../../lib/proactiveAiEngine';
+import { getLocalTodayIso } from '../../lib/nutritionCalculator';
 import { MEAL_PRESETS } from '../../lib/nutriRagEngine';
 
 export default function QuickAddModal() {
   const navigate = useNavigate();
   const quickAddOpen = useNutriStore(s => s.quickAddOpen);
   const setQuickAddOpen = useNutriStore(s => s.setQuickAddOpen);
+  const currentUser = useNutriStore(s => s.currentUser);
   const addMealEntry = useNutriStore(s => s.addMealEntry);
   const workspace = useNutriStore(s => s.workspace);
   const setWaterGlassesForDate = useNutriStore(s => s.setWaterGlassesForDate);
   const showToast = useNutriStore(s => s.showToast);
 
+  const safeFoods = getSafeFoodsForUser(currentUser || {});
   const [tab, setTab] = useState('meal'); // 'meal' | 'photo' | 'water'
   const [mealType, setMealType] = useState('Almuerzo');
-  const [selectedFoodId, setSelectedFoodId] = useState('fd-pollo');
+  const [selectedFoodId, setSelectedFoodId] = useState(() => safeFoods[0]?.id || 'fd-pollo');
   const [grams, setGrams] = useState(150);
+
+  useEffect(() => {
+    if (!quickAddOpen) return undefined;
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') setQuickAddOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [quickAddOpen, setQuickAddOpen]);
 
   if (!quickAddOpen) return null;
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getLocalTodayIso();
   const currentGlasses = Number(workspace?.waterGlassesByDate?.[today] || 0);
 
   const handleQuickAddFood = (e) => {
     e.preventDefault();
-    const food = GLOBAL_FOOD_DATABASE.find(f => f.id === selectedFoodId) || GLOBAL_FOOD_DATABASE[0];
+    const food = safeFoods.find(f => f.id === selectedFoodId) || safeFoods[0] || GLOBAL_FOOD_DATABASE[0];
     const scaled = scaleFoodPortion(food, grams);
     addMealEntry({
       date: today,
@@ -37,6 +50,13 @@ export default function QuickAddModal() {
       protein: scaled.protein,
       fat: scaled.fat,
       fiber: scaled.fiber,
+      sodiumMg: scaled.sodiumMg,
+      potassiumMg: scaled.potassiumMg,
+      ironMg: scaled.ironMg,
+      calciumMg: scaled.calciumMg,
+      vitaminCMg: scaled.vitaminCMg,
+      omega3Mg: scaled.omega3Mg,
+      glycemicLoad: scaled.glycemicLoad,
       foodId: food.id,
       image:
         mealType === 'Desayuno'
@@ -175,7 +195,7 @@ export default function QuickAddModal() {
                   if (f) setGrams(f.defaultGrams || 120);
                 }}
               >
-                {GLOBAL_FOOD_DATABASE.map(f => (
+                {safeFoods.map(f => (
                   <option key={f.id} value={f.id}>
                     {f.name} — {f.kcal} kcal / 100g
                   </option>

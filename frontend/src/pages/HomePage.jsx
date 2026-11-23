@@ -337,7 +337,8 @@ export default function HomePage() {
           {[
             { label: 'Proteínas (músculo y saciedad)', current: consumed.protein, goal: goalProtein, color: 'var(--brand-leaf)' },
             { label: 'Carbohidratos (energía diaria)', current: consumed.carbs, goal: goalCarbs, color: 'var(--accent-carrot)' },
-            { label: 'Grasas buenas (hormonas y corazón)', current: consumed.fat, goal: goalFat, color: 'var(--accent-earth)' }
+            { label: 'Grasas buenas (hormonas y corazón)', current: consumed.fat, goal: goalFat, color: 'var(--accent-earth)' },
+            { label: 'Fibra prebiótica (control glucémico y LDL)', current: consumed.fiber, goal: currentUser?.clinicalTargets?.fiberGrams || 28, color: 'var(--brand-leaf)' }
           ].map(macro => {
             const pct = Math.min(100, Math.round((macro.current / Math.max(1, macro.goal)) * 100));
             return (
@@ -346,7 +347,14 @@ export default function HomePage() {
                   <span>{macro.label}</span>
                   <span>{macro.current}g / {macro.goal}g</span>
                 </div>
-                <div style={{ height: '9px', borderRadius: '999px', backgroundColor: 'var(--bg-warm)', overflow: 'hidden' }}>
+                <div
+                  role="progressbar"
+                  aria-valuenow={pct}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label={`${macro.label}: ${macro.current} de ${macro.goal} gramos`}
+                  style={{ height: '9px', borderRadius: '999px', backgroundColor: 'var(--bg-warm)', overflow: 'hidden' }}
+                >
                   <div
                     style={{
                       width: `${pct}%`,
@@ -450,6 +458,20 @@ export default function HomePage() {
                   </div>
                   <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
                     {proto.keyRules}
+                  </p>
+                </div>
+              ))}
+              {roadmap.drugNutrientInteractions?.map(drug => (
+                <div
+                  key={drug.conditionId}
+                  className="ns-card"
+                  style={{ padding: '12px 14px', borderLeft: '3px solid var(--accent-carrot)' }}
+                >
+                  <div style={{ fontWeight: 700, color: 'var(--accent-carrot)', fontSize: '0.84rem' }}>
+                    Farmacovigilancia alimento-medicamento ({drug.medications})
+                  </div>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '0.83rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                    {drug.interactionRule}
                   </p>
                 </div>
               ))}

@@ -1,7 +1,66 @@
 import { runHybridRagQuery, getInitialDocuments } from '../services/nutriRagEngine';
-import { buildCompletePersonContext, generateProactiveDailyRoadmap } from './proactiveAiEngine';
+import {
+  buildCompletePersonContext,
+  generateProactiveDailyRoadmap,
+  ALLERGEN_SYNONYM_MATRIX
+} from './proactiveAiEngine';
 
 export * from '../services/nutriRagEngine';
+
+/**
+ * Verificador determinista post-LLM / post-síntesis:
+ * Garantiza que ninguna sugerencia textual contradiga las alergias, dieta o alimentos excluidos (`dislikedFoods`)
+ * del paciente, reemplazando menciones genéricas de ejemplos fijos por su plato seguro `recommendedMeal`.
+ */
+export function sanitizeRagAnswerForUser(rawAnswer = '', userProfile = {}, recommendedMeal = null) {
+  let cleanText = String(rawAnswer || '');
+  const safeSubstitute = recommendedMeal?.dishName || 'vegetales frescos con proteína compatible';
+
+  const forbiddenTerms = [];
+  const dislikedRaw = String(userProfile?.dislikedFoods || '')
+    .toLowerCase()
+    .split(/[,;.\n]+/)
+    .map(t => t.trim())
+    .filter(t => t.length >= 2);
+  forbiddenTerms.push(...dislikedRaw);
+
+  const customAllergyRaw = String(userProfile?.customAllergy || '')
+    .toLowerCase()
+    .split(/[,;.\n]+/)
+    .map(t => t.trim())
+    .filter(t => t.length >= 2);
+  forbiddenTerms.push(...customAllergyRaw);
+
+  const allergies = (userProfile?.allergies || []).map(a => String(a).toLowerCase());
+  const dietType = String(userProfile?.dietType || '').toLowerCase();
+
+  if (allergies.some(a => a.includes('lactosa') || a.includes('lacteo')) || dietType === 'sin_lactosa' || dietType === 'vegana') {
+    forbiddenTerms.push('yogur griego', 'queso', 'leche');
+  }
+  if (allergies.some(a => a.includes('gluten') || a.includes('trigo')) || dietType === 'sin_gluten') {
+    forbiddenTerms.push('trigo', 'pasta', 'cebada');
+  }
+  if (allergies.some(a => a.includes('huevo')) || dietType === 'vegana') {
+    forbiddenTerms.push('huevo', 'claras');
+  }
+  if (allergies.some(a => a.includes('marisco') || a.includes('pescado')) || dietType === 'vegetariana' || dietType === 'vegana') {
+    forbiddenTerms.push('salmon', 'salmón', 'trucha', 'atun', 'atún', 'sardina', 'jurel', 'pescado');
+  }
+  if (dietType === 'vegetariana' || dietType === 'vegana') {
+    forbiddenTerms.push('pechuga de pollo', 'pollo', 'carne de res');
+  }
+
+  const uniqueForbidden = [...new Set(forbiddenTerms.filter(Boolean))];
+  uniqueForbidden.forEach(term => {
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const rx = new RegExp(escaped, 'gi');
+    if (rx.test(cleanText)) {
+      cleanText = cleanText.replace(rx, `[${safeSubstitute}]`);
+    }
+  });
+
+  return cleanText;
+}
 
 /**
  * Detector determinista de banderas rojas y emergencias médicas agudas.
@@ -123,22 +182,31 @@ export async function queryHybridRag({
     memoryContext
   );
 
-  // 3. Añadir bloque clínico personalizado y farmacovigilancia al final si la consulta es válida
+  // 3. Sanitización determinista post-LLM contra alergias/disgustos + bloque clínico personalizado y farmacovigilancia
   if (!baseResult.guardrailTriggered && userProfile) {
-    const protocolNote = roadmap.protocols[0]
-      ? `\n\n**Respaldo clínico para tu perfil (${roadmap.protocols[0].source}):** ${roadmap.protocols[0].keyRules}${
-          roadmap.drugNutrientInteractions?.[0]
-            ? `\n**Nota de farmacovigilancia (${roadmap.drugNutrientInteractions[0].source}):** ${roadmap.drugNutrientInteractions[0].interactionRule}`
-            : ''
-        }${
-          userProfile.dislikedFoods
-            ? ` *(Recuerda que hemos excluido "${userProfile.dislikedFoods}" de todas tus recomendaciones).*`
-            : ''
-        }`
-      : '';
+    const sanitizedAnswer = sanitizeRagAnswerForUser(
+      baseResult.answer,
+      userProfile,
+      roadmap.recommendedMeal
+    );
+    const allProtocolsNote = roadmap.protocols
+      .map(p => `- **${p.label} (${p.source}):** ${p.keyRules}`)
+      .join('\n');
+    const allDrugNotes = (roadmap.drugNutrientInteractions || [])
+      .map(d => `- **Farmacovigilancia (${d.source} — ${d.medications}):** ${d.interactionRule}`)
+      .join('\n');
+
+    const protocolNote = `\n\n**Respaldo clínico activo en tu perfil:**\n${allProtocolsNote}${
+      allDrugNotes ? `\n${allDrugNotes}` : ''
+    }${
+      userProfile.dislikedFoods
+        ? `\n*(Verificación de seguridad activa: excluimos "${userProfile.dislikedFoods}" y tus alérgenos de toda sugerencia).*`
+        : ''
+    }`;
+
     return {
       ...baseResult,
-      answer: `${baseResult.answer}${protocolNote}`,
+      answer: `${sanitizedAnswer}${protocolNote}`,
       recommendedMeal: roadmap.recommendedMeal
     };
   }

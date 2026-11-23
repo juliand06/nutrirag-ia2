@@ -1,7 +1,12 @@
 import React, { useState } from 'react';
 import { useNutriStore } from '../store/useNutriStore';
 import { GLOBAL_FOOD_DATABASE, scaleFoodPortion } from '../lib/foodDatabase';
-import { generateProactiveDailyRoadmap, getSafeFoodsForUser } from '../lib/proactiveAiEngine';
+import {
+  generateProactiveDailyRoadmap,
+  getSafeFoodsForUser,
+  analyzeDayClinicalMetrics
+} from '../lib/proactiveAiEngine';
+import { getLocalTodayIso } from '../lib/nutritionCalculator';
 import { HandBowlIllustration } from '../assets/doodles/HandDrawnSvgs';
 
 const MEAL_SECTIONS = [
@@ -35,11 +40,9 @@ function getPreviousDateIso(dateIso) {
 }
 
 export default function DiaryPage() {
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = getLocalTodayIso();
   const [selectedDate, setSelectedDate] = useState(todayIso);
   const [addingToMeal, setAddingToMeal] = useState(null);
-  const [selectedFoodId, setSelectedFoodId] = useState('fd-huevo');
-  const [portionGrams, setPortionGrams] = useState(120);
 
   const currentUser = useNutriStore(s => s.currentUser);
   const workspace = useNutriStore(s => s.workspace);
@@ -49,21 +52,15 @@ export default function DiaryPage() {
   const copyMealsFromDate = useNutriStore(s => s.copyMealsFromDate);
 
   const safeFoods = getSafeFoodsForUser(currentUser || {});
+  const [selectedFoodId, setSelectedFoodId] = useState(() => safeFoods[0]?.id || 'fd-avena');
+  const [portionGrams, setPortionGrams] = useState(120);
+
   const roadmap = generateProactiveDailyRoadmap(currentUser || {}, workspace || {});
   const weekDays = buildWeekDays(todayIso);
   const allLogs = workspace?.mealLogs || [];
   const dayLogs = allLogs.filter(m => m.date === selectedDate);
-
-  const dayTotals = dayLogs.reduce(
-    (acc, m) => ({
-      kcal: acc.kcal + (Number(m.kcal) || 0),
-      carbs: acc.carbs + (Number(m.carbs) || 0),
-      protein: acc.protein + (Number(m.protein) || 0),
-      fat: acc.fat + (Number(m.fat) || 0),
-      fiber: acc.fiber + (Number(m.fiber) || 0)
-    }),
-    { kcal: 0, carbs: 0, protein: 0, fat: 0, fiber: 0 }
-  );
+  const clinicalMetrics = analyzeDayClinicalMetrics({ dayLogs, userProfile: currentUser || {} });
+  const dayTotals = clinicalMetrics.totals;
 
   const goalProtein = Number(currentUser?.targetProtein) || 125;
   const remainingProtein = Math.max(0, goalProtein - dayTotals.protein);
@@ -75,7 +72,7 @@ export default function DiaryPage() {
 
   const handleAddInline = (e, mealType, photo) => {
     e.preventDefault();
-    const food = GLOBAL_FOOD_DATABASE.find(f => f.id === selectedFoodId) || safeFoods[0] || GLOBAL_FOOD_DATABASE[0];
+    const food = safeFoods.find(f => f.id === selectedFoodId) || safeFoods[0] || GLOBAL_FOOD_DATABASE[0];
     const scaled = scaleFoodPortion(food, portionGrams);
     addMealEntry({
       date: selectedDate,
@@ -87,6 +84,13 @@ export default function DiaryPage() {
       protein: scaled.protein,
       fat: scaled.fat,
       fiber: scaled.fiber,
+      sodiumMg: scaled.sodiumMg,
+      potassiumMg: scaled.potassiumMg,
+      ironMg: scaled.ironMg,
+      calciumMg: scaled.calciumMg,
+      vitaminCMg: scaled.vitaminCMg,
+      omega3Mg: scaled.omega3Mg,
+      glycemicLoad: scaled.glycemicLoad,
       foodId: food.id,
       image: photo
     });
@@ -201,16 +205,37 @@ export default function DiaryPage() {
             <span className="ns-chip">Proteína: {dayTotals.protein}g / {goalProtein}g</span>
             <span className="ns-chip">Carbos: {dayTotals.carbs}g</span>
             <span className="ns-chip">Grasas: {dayTotals.fat}g</span>
-            <span className="ns-chip">Fibra: {dayTotals.fiber}g / 28g</span>
+            <span className="ns-chip">Fibra: {dayTotals.fiber}g / {clinicalMetrics.targets.fiberGrams}g</span>
           </div>
+        </div>
+
+        {/* Fila de Biomarcadores Clínicos del Día (Carga Glucémica, Sodio/Potasio, Hierro+VitC, Omega-3) */}
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', paddingTop: '4px' }}>
+          <span className="ns-chip" style={{ fontSize: '0.78rem' }}>
+            Carga Glucémica (ADA): {dayTotals.glycemicLoad} ({clinicalMetrics.glycemicLoadLevel})
+          </span>
+          <span className="ns-chip" style={{ fontSize: '0.78rem' }}>
+            Sodio / Potasio (DASH): {dayTotals.sodiumMg}mg Na / {dayTotals.potassiumMg}mg K (Razón {clinicalMetrics.naKRatio})
+          </span>
+          <span className="ns-chip" style={{ fontSize: '0.78rem' }}>
+            Hierro + Vit. C (OMS): {dayTotals.ironMg}mg Fe + {dayTotals.vitaminCMg}mg Vit.C
+          </span>
+          <span className="ns-chip" style={{ fontSize: '0.78rem' }}>
+            Omega-3 (AHA): {dayTotals.omega3Mg}mg
+          </span>
+          <span className="ns-chip" style={{ fontSize: '0.78rem' }}>
+            Pulsos proteicos ≥24g (ISSN): {clinicalMetrics.anabolicMealsCount} tomas
+          </span>
         </div>
 
         <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
           {dayLogs.length === 0
             ? `Aún no tienes registros en esta fecha. Tu IA recomienda empezar tu ${roadmap.nextMealType.toLowerCase()} con "${roadmap.recommendedMeal.dishName}" (${roadmap.recommendedMeal.kcal} kcal, ${roadmap.recommendedMeal.protein}g proteína) siguiendo el protocolo ${roadmap.protocols[0]?.label}.`
-            : remainingProtein > 25
-              ? `Análisis clínico de tus ${dayLogs.length} registros: llevas ${dayTotals.protein}g de proteína y ${dayTotals.fiber}g de fibra. Para tu siguiente comida del día, tu IA te recomienda incluir al menos ${Math.min(40, remainingProtein)}g de proteína magra (${safeFoods[0]?.name.split('(')[0].trim()}) acompañada de vegetales fibrosos para cumplir el consenso ISSN y estabilizar la glucosa.`
-              : `¡Excelente distribución clínica hoy! Has alcanzado un muy buen aporte proteico (${dayTotals.protein}g) que protege tu masa muscular y mantiene la saciedad nocturna.`}
+            : clinicalMetrics.clinicalFindings.length > 0
+              ? clinicalMetrics.clinicalFindings.join(' · ')
+              : remainingProtein > 25
+                ? `Análisis clínico de tus ${dayLogs.length} registros: llevas ${dayTotals.protein}g de proteína y ${dayTotals.fiber}g de fibra. Para tu siguiente comida del día, tu IA te recomienda incluir al menos ${Math.min(40, remainingProtein)}g de proteína magra (${safeFoods[0]?.name.split('(')[0].trim()}) acompañada de vegetales fibrosos para cumplir el consenso ISSN y estabilizar la glucosa.`
+                : `¡Excelente distribución clínica hoy! Has alcanzado un muy buen aporte proteico (${dayTotals.protein}g) y carga glucémica controlada que protegen tu masa muscular y saciedad nocturna.`}
         </p>
       </div>
 

@@ -38,13 +38,33 @@ export function buildMealFromFoods(mealType, foodObjects, targetMealKcal = 500) 
 
   const totals = items.reduce(
     (acc, it) => ({
+      grams: acc.grams + it.grams,
       kcal: acc.kcal + it.kcal,
       carbs: acc.carbs + it.carbs,
       protein: acc.protein + it.protein,
       fat: acc.fat + it.fat,
-      fiber: acc.fiber + it.fiber
+      fiber: acc.fiber + it.fiber,
+      sodiumMg: acc.sodiumMg + (it.sodiumMg || 0),
+      potassiumMg: acc.potassiumMg + (it.potassiumMg || 0),
+      ironMg: Number((acc.ironMg + (it.ironMg || 0)).toFixed(1)),
+      vitaminCMg: acc.vitaminCMg + (it.vitaminCMg || 0),
+      omega3Mg: acc.omega3Mg + (it.omega3Mg || 0),
+      glycemicLoad: Number((acc.glycemicLoad + (it.glycemicLoad || 0)).toFixed(1))
     }),
-    { kcal: 0, carbs: 0, protein: 0, fat: 0, fiber: 0 }
+    {
+      grams: 0,
+      kcal: 0,
+      carbs: 0,
+      protein: 0,
+      fat: 0,
+      fiber: 0,
+      sodiumMg: 0,
+      potassiumMg: 0,
+      ironMg: 0,
+      vitaminCMg: 0,
+      omega3Mg: 0,
+      glycemicLoad: 0
+    }
   );
 
   return {
@@ -66,11 +86,14 @@ export function generateWeeklyPlan({
   const effectiveProfile = userProfile || { country: countryId, dietType: dietStyle };
   const safePool = getSafeFoodsForUser(effectiveProfile);
 
-  const proteins = safePool.filter(f => f.category === 'Proteínas' || f.category === 'Lácteos y Huevos');
+  const proteins = safePool.filter(
+    f => f.category === 'Proteínas' || f.category === 'Lácteos y Huevos' || f.category === 'Legumbres'
+  );
   const carbs = safePool.filter(f => f.category === 'Carbohidratos' || f.category === 'Legumbres');
-  const produce = safePool.filter(f => f.category === 'Frutas y Verduras' || f.category === 'Grasas Saludables');
+  const produce = safePool.filter(f => f.category === 'Frutas y Verduras');
+  const healthyFats = safePool.filter(f => f.category === 'Grasas Saludables' || f.category === 'Frutas y Verduras');
 
-  const pick = (arr, idx) => (arr.length > 0 ? arr[idx % arr.length] : safePool[idx % safePool.length]);
+  const pick = (arr, idx) => (arr.length > 0 ? arr[idx % arr.length] : safePool[idx % Math.max(1, safePool.length)]);
 
   return DAYS_OF_WEEK.map((dayName, dayIdx) => {
     const mealConfigs = [
@@ -82,12 +105,12 @@ export function generateWeeklyPlan({
       {
         mealType: 'Almuerzo',
         share: 0.36,
-        foods: [pick(proteins, dayIdx + 1), pick(carbs, dayIdx + 2), pick(produce, dayIdx + 1)]
+        foods: [pick(proteins, dayIdx + 1), pick(carbs, dayIdx + 2), pick(produce, dayIdx + 1), pick(healthyFats, dayIdx)]
       },
       {
         mealType: 'Merienda',
         share: 0.13,
-        foods: [pick(produce, dayIdx + 2), pick(proteins, dayIdx + 2)]
+        foods: [pick(produce, dayIdx + 2), pick(healthyFats, dayIdx + 1)]
       },
       {
         mealType: 'Cena',
@@ -105,9 +128,14 @@ export function generateWeeklyPlan({
         kcal: acc.kcal + m.kcal,
         carbs: acc.carbs + m.carbs,
         protein: acc.protein + m.protein,
-        fat: acc.fat + m.fat
+        fat: acc.fat + m.fat,
+        fiber: acc.fiber + (m.fiber || 0),
+        sodiumMg: acc.sodiumMg + (m.sodiumMg || 0),
+        potassiumMg: acc.potassiumMg + (m.potassiumMg || 0),
+        omega3Mg: acc.omega3Mg + (m.omega3Mg || 0),
+        glycemicLoad: Number((acc.glycemicLoad + (m.glycemicLoad || 0)).toFixed(1))
       }),
-      { kcal: 0, carbs: 0, protein: 0, fat: 0 }
+      { kcal: 0, carbs: 0, protein: 0, fat: 0, fiber: 0, sodiumMg: 0, potassiumMg: 0, omega3Mg: 0, glycemicLoad: 0 }
     );
 
     return {
@@ -121,11 +149,16 @@ export function generateWeeklyPlan({
 
 export function regenerateMealInDay(weeklyPlan, dayIndex, mealType, targetCalories = 2000, userProfile = null) {
   const safePool = getSafeFoodsForUser(userProfile || { country: 'CO' });
-  const proteins = safePool.filter(f => f.category === 'Proteínas' || f.category === 'Lácteos y Huevos');
+  const proteins = safePool.filter(
+    f => f.category === 'Proteínas' || f.category === 'Lácteos y Huevos' || f.category === 'Legumbres'
+  );
   const carbs = safePool.filter(f => f.category === 'Carbohidratos' || f.category === 'Legumbres');
   const produce = safePool.filter(f => f.category === 'Frutas y Verduras' || f.category === 'Grasas Saludables');
 
-  const rand = arr => (arr.length > 0 ? arr[Math.floor(Math.random() * arr.length)] : GLOBAL_FOOD_DATABASE[0]);
+  const rand = arr =>
+    arr.length > 0
+      ? arr[Math.floor(Math.random() * arr.length)]
+      : safePool[Math.floor(Math.random() * Math.max(1, safePool.length))];
   const chosenFoods =
     mealType === 'Merienda' ? [rand(produce), rand(proteins)] : [rand(proteins), rand(carbs), rand(produce)];
 
@@ -141,9 +174,14 @@ export function regenerateMealInDay(weeklyPlan, dayIndex, mealType, targetCalori
         kcal: acc.kcal + m.kcal,
         carbs: acc.carbs + m.carbs,
         protein: acc.protein + m.protein,
-        fat: acc.fat + m.fat
+        fat: acc.fat + m.fat,
+        fiber: acc.fiber + (m.fiber || 0),
+        sodiumMg: acc.sodiumMg + (m.sodiumMg || 0),
+        potassiumMg: acc.potassiumMg + (m.potassiumMg || 0),
+        omega3Mg: acc.omega3Mg + (m.omega3Mg || 0),
+        glycemicLoad: Number((acc.glycemicLoad + (m.glycemicLoad || 0)).toFixed(1))
       }),
-      { kcal: 0, carbs: 0, protein: 0, fat: 0 }
+      { kcal: 0, carbs: 0, protein: 0, fat: 0, fiber: 0, sodiumMg: 0, potassiumMg: 0, omega3Mg: 0, glycemicLoad: 0 }
     );
     return { ...day, meals, dayTotals };
   });

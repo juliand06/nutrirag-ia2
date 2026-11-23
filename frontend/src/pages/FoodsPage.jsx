@@ -107,9 +107,10 @@ export default function FoodsPage() {
       {showScanner && (
         <div style={{ marginBottom: '26px' }}>
           <BarcodeScannerPanel
-            onAddScannedMeal={(mealObj) => {
+            mealType={mealType}
+            onAddBarcodeMeal={(mealObj) => {
               addMealEntry({
-                mealType: mealObj.mealType || 'Merienda',
+                mealType: mealObj.mealType || mealType || 'Merienda',
                 dishName: mealObj.dishName,
                 grams: 100,
                 kcal: mealObj.totalCalories,
@@ -445,10 +446,10 @@ export default function FoodsPage() {
                 color: 'var(--text-secondary)'
               }}
             >
-              <li>• <strong>Fibra ({scaledDetail.fiber} g):</strong> Ayuda a tu digestión y te mantiene lleno por más horas.</li>
-              <li>• <strong>Potasio ({scaledDetail.potassiumMg} mg) y Sodio ({scaledDetail.sodiumMg} mg):</strong> Equilibrio clave para tu presión arterial.</li>
-              <li>• <strong>Hierro ({scaledDetail.ironMg} mg):</strong> Importante para evitar el cansancio y oxigenar tu cuerpo.</li>
-              <li>• <strong>Vitamina C ({scaledDetail.vitaminCMg} mg):</strong> Mejora tus defensas y ayuda a absorber el hierro vegetal.</li>
+              <li>• <strong>Fibra ({scaledDetail.fiber} g) y Carga Glucémica ({scaledDetail.glycemicLoad}):</strong> Regula la velocidad de absorción de glucosa (ADA) y prolonga la saciedad.</li>
+              <li>• <strong>Potasio ({scaledDetail.potassiumMg} mg) y Sodio ({scaledDetail.sodiumMg} mg):</strong> Equilibrio electrolítico clave en el protocolo DASH / KDIGO.</li>
+              <li>• <strong>Hierro ({scaledDetail.ironMg} mg) + Vitamina C ({scaledDetail.vitaminCMg} mg):</strong> Sinergia hematológica para oxigenación y prevención de fatiga (OMS).</li>
+              <li>• <strong>Omega-3 ({scaledDetail.omega3Mg} mg) y Calcio ({scaledDetail.calciumMg} mg):</strong> Protección endotelial, antiinflamatoria (AHA) y densidad ósea.</li>
             </ul>
 
             <button
@@ -463,6 +464,13 @@ export default function FoodsPage() {
                   protein: scaledDetail.protein,
                   fat: scaledDetail.fat,
                   fiber: scaledDetail.fiber,
+                  sodiumMg: scaledDetail.sodiumMg,
+                  potassiumMg: scaledDetail.potassiumMg,
+                  ironMg: scaledDetail.ironMg,
+                  calciumMg: scaledDetail.calciumMg,
+                  vitaminCMg: scaledDetail.vitaminCMg,
+                  omega3Mg: scaledDetail.omega3Mg,
+                  glycemicLoad: scaledDetail.glycemicLoad,
                   foodId: selectedFood.id,
                   image: CATEGORY_PHOTOS[selectedFood.category] || '/img/plato-almuerzo.webp'
                 })

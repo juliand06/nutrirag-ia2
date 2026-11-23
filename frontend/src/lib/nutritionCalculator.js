@@ -188,6 +188,7 @@ export function buildPersonalizedNutritionSummary(onboardingData = {}) {
 
   // Reglas de seguridad clínica
   const isMinor = age < 18;
+  const isSenior = age >= 65;
   const isPregnantOrLactating =
     conditions.includes('embarazo_lactancia') ||
     hasPositiveClinicalMatch(customConditionText, /\b(embaraz\w*|lactan\w*|gestaci\w*|posparto)\b/);
@@ -197,9 +198,15 @@ export function buildPersonalizedNutritionSummary(onboardingData = {}) {
       customConditionText,
       /\b(anorexi\w*|bulimi\w*|atracon\w*|ortorexi\w*|arfid|purga\w*|tca|trastorno\s+aliment\w*)\b/
     );
+  const hasType1Diabetes =
+    conditions.includes('diabetes_tipo_1') ||
+    hasPositiveClinicalMatch(customConditionText, /\b(diabetes\s+tipo\s*1|dm1|bomba\s+de\s+insulina)\b/);
+
   const isWantsDeficit = rawGoal === 'deficit_calorico' || rawGoal === 'control_condicion';
-  const isUnderweightNow = bmi < 18.5;
-  const isTargetUnderweight = targetBmi < 18.5 && targetWeightKg < weightKg;
+  // En adultos mayores (>=65 años, consenso ESPEN/OPS), un IMC < 22.0 indica riesgo de sarcopenia/fragilidad
+  const safeMinBmi = isSenior ? 22.0 : 18.5;
+  const isUnderweightNow = bmi < safeMinBmi;
+  const isTargetUnderweight = targetBmi < safeMinBmi && targetWeightKg < weightKg;
   const isUnderweightForDeficit = isWantsDeficit && (isUnderweightNow || isTargetUnderweight);
   const wouldBeUnderFloor = rawSuggestedCalories < sexSafeFloorKcal;
 
@@ -213,11 +220,14 @@ export function buildPersonalizedNutritionSummary(onboardingData = {}) {
   if (hasEatingDisorder) {
     safetyReasons.push('Indicaste antecedentes o inquietudes sobre la relación con la comida (TCA), donde tu bienestar integral y acompañamiento profesional van primero.');
   }
+  if (hasType1Diabetes) {
+    safetyReasons.push('Indicaste Diabetes Tipo 1, donde el conteo de carbohidratos debe coordinarse estrictamente con tu esquema de insulina junto a tu endocrinólogo.');
+  }
   if (isUnderweightForDeficit) {
     safetyReasons.push(
       isUnderweightNow
-        ? `Tu IMC actual (${bmi}) está en rango de bajo peso (< 18.5), por lo que un déficit calórico está clínicamente contraindicado.`
-        : `El peso meta indicado llevaría a un IMC de ${targetBmi} (< 18.5). Protegemos tu masa muscular y salud hormonal manteniendo un rango seguro.`
+        ? `Tu IMC actual (${bmi}) está por debajo del umbral clínico protector (${safeMinBmi} kg/m²${isSenior ? ' en adultos mayores ESPEN' : ''}), por lo que un déficit calórico está contraindicado.`
+        : `El peso meta indicado llevaría a un IMC de ${targetBmi} (< ${safeMinBmi}). Protegemos tu masa muscular y salud hormonal manteniendo un rango seguro.`
     );
   }
   if (wouldBeUnderFloor && isWantsDeficit) {
@@ -230,6 +240,7 @@ export function buildPersonalizedNutritionSummary(onboardingData = {}) {
     isMinor ||
     isPregnantOrLactating ||
     hasEatingDisorder ||
+    hasType1Diabetes ||
     isUnderweightForDeficit ||
     (wouldBeUnderFloor && isWantsDeficit);
 
@@ -240,15 +251,24 @@ export function buildPersonalizedNutritionSummary(onboardingData = {}) {
 
   const effectiveGoalObj = safetyAdvisoryActive ? ONBOARDING_GOALS[3] : goalObj;
 
-  // Ajuste clínico de proteína si hay condición renal (KDIGO: evitar sobrecarga proteica > 1.2g/kg sin orden médica)
+  // Ajuste clínico de proteína:
+  // 1) Si hay condición renal (KDIGO), limitar a <= 1.0 g/kg y redistribuir las calorías restantes en carbos/grasas para evitar desgaste proteico-energético (PEW).
+  // 2) Si es adulto mayor (>= 65 años, ESPEN/PROT-AGE) sin enfermedad renal, asegurar piso mínimo de 1.2 g/kg contra sarcopenia.
   const hasRenalCondition = conditions.some(c => normalizeClinicalText(c).includes('renal'));
   const rawTargetProtein = Math.round((safeDailyCalories * effectiveGoalObj.proteinRatio) / 4);
+  const seniorMinProtein = isSenior && !hasRenalCondition ? Math.round(weightKg * 1.2) : 0;
   const targetProtein = hasRenalCondition
     ? Math.min(rawTargetProtein, Math.round(weightKg * 1.0))
-    : rawTargetProtein;
+    : Math.max(rawTargetProtein, seniorMinProtein);
 
-  const targetCarbs = Math.round((safeDailyCalories * effectiveGoalObj.carbsRatio) / 4);
-  const targetFat = Math.round((safeDailyCalories * effectiveGoalObj.fatRatio) / 9);
+  const proteinKcal = targetProtein * 4;
+  const remainingNonProteinKcal = Math.max(400, safeDailyCalories - proteinKcal);
+  const nonProteinRatioSum = Math.max(0.1, effectiveGoalObj.carbsRatio + effectiveGoalObj.fatRatio);
+  const normCarbsShare = effectiveGoalObj.carbsRatio / nonProteinRatioSum;
+  const normFatShare = effectiveGoalObj.fatRatio / nonProteinRatioSum;
+
+  const targetCarbs = Math.round((remainingNonProteinKcal * normCarbsShare) / 4);
+  const targetFat = Math.round((remainingNonProteinKcal * normFatShare) / 9);
 
   // Hidratación clínica: 35 ml/kg estándar (moderada en condición renal con nota de supervisión)
   const waterGoalMl = hasRenalCondition
@@ -256,20 +276,36 @@ export function buildPersonalizedNutritionSummary(onboardingData = {}) {
     : Math.max(1750, Math.round(weightKg * 35));
   const waterGlasses = Math.max(6, Math.round(waterGoalMl / 250));
 
-  // Metas clínicas de micronutrientes basadas en OMS / ADA / AHA-DASH / KDIGO
+  // Metas clínicas de micronutrientes basadas en OMS / ADA / AHA-DASH / KDIGO / ESPEN
   const hasHypertension = conditions.some(c => normalizeClinicalText(c).includes('hiperten'));
-  const hasDiabetes = conditions.some(c => normalizeClinicalText(c).includes('diabet'));
+  const hasDiabetes = conditions.some(c => normalizeClinicalText(c).includes('diabet') || normalizeClinicalText(c).includes('sop'));
+  const hasAnemia = conditions.some(c => normalizeClinicalText(c).includes('anemia'));
+  const hasGastritis = conditions.some(c => normalizeClinicalText(c).includes('gastritis'));
+  const isPlantBased = onboardingData.dietType === 'vegana' || onboardingData.dietType === 'vegetariana';
+
+  const baseIronMg =
+    isPregnantOrLactating ? 27 : (sex === 'femenino' && age >= 14 && age <= 50) || hasAnemia ? 18 : 8;
+  const ironTargetMg = isPlantBased ? Math.round(baseIronMg * 1.5) : baseIronMg;
+  const calciumTargetMg = isMinor ? 1300 : isSenior || (sex === 'femenino' && age >= 51) ? 1200 : 1000;
+  const vitaminCTargetMg = hasAnemia ? 110 : sex === 'masculino' ? 90 : 75;
+
   const clinicalTargets = {
-    fiberGrams: Math.max(25, Math.min(38, Math.round((safeDailyCalories / 1000) * 14))),
+    fiberGrams: hasGastritis
+      ? 25
+      : Math.max(25, Math.min(38, Math.round((safeDailyCalories / 1000) * 14))),
     sodiumMaxMg: hasHypertension || hasRenalCondition ? 1500 : 2000,
     potassiumTargetMg: hasRenalCondition ? 2200 : hasHypertension ? 4200 : 3500,
     proteinPerKg: Number((targetProtein / Math.max(1, weightKg)).toFixed(2)),
     addedSugarMaxGrams: hasDiabetes ? 15 : 25,
-    omega3TargetMg: 1000
+    omega3TargetMg: 1000,
+    ironTargetMg,
+    calciumTargetMg,
+    vitaminCTargetMg,
+    glycemicLoadMaxDaily: hasDiabetes ? 80 : 110
   };
 
   const bmiExplanation =
-    bmi < 18.5
+    bmi < safeMinBmi
       ? 'Tu relación peso-estatura indica que tu cuerpo se beneficiará de platos densos en nutrientes, proteína de calidad y grasas saludables sin recortes calóricos.'
       : bmi < 25
         ? 'Tu relación peso-estatura está en un rango de equilibrio general; nos enfocaremos en calidad de alimentos, masa muscular y energía diaria.'
@@ -278,8 +314,8 @@ export function buildPersonalizedNutritionSummary(onboardingData = {}) {
   const country = getCountryProfile(onboardingData.country || 'CO');
   const budget = getBudgetProfile(onboardingData.budgetTier || 'equilibrado');
 
-  // Peso meta seguro (nunca menor a IMC 18.5)
-  const minHealthyWeightKg = Number((18.5 * heightM * heightM).toFixed(1));
+  // Peso meta seguro (nunca menor al IMC protector por edad)
+  const minHealthyWeightKg = Number((safeMinBmi * heightM * heightM).toFixed(1));
   const safeTargetWeightKg = safetyAdvisoryActive
     ? weightKg
     : Math.max(minHealthyWeightKg, targetWeightKg);

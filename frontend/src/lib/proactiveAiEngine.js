@@ -18,14 +18,14 @@ function norm(str) {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
-// Matriz estructurada de alérgenos y sinónimos clínicos (FDA / EFSA Big 8/9)
-const ALLERGEN_SYNONYM_MATRIX = {
-  lactosa: ['queso', 'leche', 'yogur', 'cottage', 'suero', 'whey', 'caseina', 'mantequilla', 'crema de leche', 'lactosa', 'kumis'],
-  gluten: ['trigo', 'pan ', 'pan integral', 'masa madre', 'pasta', 'cebada', 'centeno', 'semola', 'cuscus', 'malta', 'galleta'],
-  huevo: ['huevo', 'claras', 'yema', 'albumina', 'mayonesa'],
-  mariscos_pescado: ['salmon', 'trucha', 'atun', 'sardina', 'jurel', 'bonito', 'camaron', 'langostino', 'cangrejo', 'marisco', 'pescado', 'tilapia', 'merluza', 'pulpo', 'calamar'],
-  mani_frutos_secos: ['mani', 'cacahuate', 'nuez', 'nueces', 'almendra', 'pistacho', 'maranon', 'anacardo', 'avellana', 'pecana', 'macadamia'],
-  soya: ['soya', 'soja', 'tofu', 'edamame', 'tempeh', 'lecitina de soya']
+// Matriz estructurada bilingüe de alérgenos y sinónimos clínicos (FDA / EFSA Big 8/9 + Taxonomía Open Food Facts)
+export const ALLERGEN_SYNONYM_MATRIX = {
+  lactosa: ['queso', 'leche', 'yogur', 'cottage', 'suero', 'whey', 'caseina', 'mantequilla', 'crema de leche', 'lactosa', 'kumis', 'requeson', 'ricotta', 'milk', 'dairy', 'lactose'],
+  gluten: ['trigo', 'pan', 'masa madre', 'pasta', 'cebada', 'centeno', 'semola', 'cuscus', 'malta', 'galleta', 'wheat', 'gluten', 'barley', 'rye'],
+  huevo: ['huevo', 'claras', 'yema', 'albumina', 'mayonesa', 'egg', 'eggs'],
+  mariscos_pescado: ['salmon', 'trucha', 'atun', 'sardina', 'jurel', 'bonito', 'camaron', 'langostino', 'cangrejo', 'marisco', 'pescado', 'tilapia', 'merluza', 'pulpo', 'calamar', 'fish', 'crustaceans', 'shrimp', 'shellfish'],
+  mani_frutos_secos: ['mani', 'cacahuate', 'nuez', 'nueces', 'almendra', 'pistacho', 'maranon', 'anacardo', 'avellana', 'pecana', 'macadamia', 'peanut', 'peanuts', 'nuts', 'tree-nuts', 'hazelnut', 'almond', 'walnut'],
+  soya: ['soya', 'soja', 'tofu', 'edamame', 'tempeh', 'lecitina de soya', 'soy', 'soybeans']
 };
 
 /**
@@ -141,7 +141,13 @@ export function evaluateFoodPersonalCompatibility(food, userProfile = {}) {
 
   const foodName = norm(food.name);
   const foodCat = norm(food.category);
-  const foodTags = Array.isArray(food.allergens) ? food.allergens.map(norm) : [];
+  const foodTags = [
+    ...(Array.isArray(food.allergens) ? food.allergens : []),
+    ...(Array.isArray(food.allergensTags) ? food.allergensTags : []),
+    ...(Array.isArray(food.traces) ? food.traces : []),
+    ...(Array.isArray(food.tracesTags) ? food.tracesTags : [])
+  ].map(norm);
+  const ingredientsNorm = norm(food.ingredientsText || '');
   const allergies = (userProfile?.allergies || []).map(norm);
   const customAllergy = norm(userProfile?.customAllergy || '');
   const dislikedRaw = norm(userProfile?.dislikedFoods || '');
@@ -151,16 +157,20 @@ export function evaluateFoodPersonalCompatibility(food, userProfile = {}) {
   const reasons = [];
   let level = 'optimal'; // 'optimal' | 'caution' | 'avoid'
 
-  const matchesAnyKeyword = (keywords) =>
-    keywords.some(kw => foodName.includes(kw) || foodTags.some(t => t.includes(kw)));
+  const matchesWordOrTag = (kw) => {
+    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const rx = new RegExp(`(^|[^a-z0-9])${escaped}(s|es)?([^a-z0-9]|$)`);
+    return rx.test(foodName) || rx.test(ingredientsNorm) || foodTags.some(t => t.includes(kw));
+  };
+  const matchesAnyKeyword = (keywords) => keywords.some(matchesWordOrTag);
 
   // 1. Alimentos que no le gustan (dislikedFoods)
   const dislikedTokens = dislikedRaw
     .split(/[,;.\n]+/)
     .map(t => t.trim())
-    .filter(t => t.length >= 3);
+    .filter(t => t.length >= 2);
   for (const token of dislikedTokens) {
-    if (foodName.includes(token)) {
+    if (matchesWordOrTag(token)) {
       level = 'avoid';
       reasons.push(`Indicaste que no te gusta "${token}". Tu IA lo excluye de tus sugerencias.`);
     }
@@ -170,9 +180,9 @@ export function evaluateFoodPersonalCompatibility(food, userProfile = {}) {
   const customAllergyTokens = customAllergy
     .split(/[,;.\n]+/)
     .map(t => t.trim())
-    .filter(t => t.length >= 3);
+    .filter(t => t.length >= 2);
   for (const token of customAllergyTokens) {
-    if (foodName.includes(token) || foodTags.some(t => t.includes(token))) {
+    if (matchesWordOrTag(token)) {
       level = 'avoid';
       reasons.push(`Coincide con tu alergia/intolerancia registrada ("${token}").`);
     }
@@ -322,21 +332,171 @@ export function evaluateFoodPersonalCompatibility(food, userProfile = {}) {
 }
 
 /**
- * Filtra la base de datos de alimentos devolviendo solo aquellos 100% compatibles
- * con las alergias, disgustos, tipo de dieta y país de la persona.
+ * Filtra la base de datos de alimentos devolviendo solo aquellos compatibles
+ * con las alergias, disgustos, tipo de dieta y país de la persona (NUNCA hace fallback a alérgenos).
  */
 export function getSafeFoodsForUser(userProfile = {}) {
   const countryId = userProfile?.country || 'CO';
-  const safe = GLOBAL_FOOD_DATABASE.filter(
-    f => evaluateFoodPersonalCompatibility(f, userProfile).compatible
-  );
-  const pool = safe.length >= 6 ? safe : GLOBAL_FOOD_DATABASE;
-  return [...pool].sort((a, b) => {
-    const aLoc = a.regions.includes(countryId) ? 1 : 0;
-    const bLoc = b.regions.includes(countryId) ? 1 : 0;
-    if (bLoc !== aLoc) return bLoc - aLoc;
-    return b.qualityScore - a.qualityScore;
+  const evaluated = GLOBAL_FOOD_DATABASE.map(f => ({
+    food: f,
+    compat: evaluateFoodPersonalCompatibility(f, userProfile)
+  })).filter(item => item.compat.compatible);
+
+  return evaluated
+    .sort((a, b) => {
+      // Priorizar 'optimal' sobre 'caution'
+      const aOpt = a.compat.level === 'optimal' ? 1 : 0;
+      const bOpt = b.compat.level === 'optimal' ? 1 : 0;
+      if (bOpt !== aOpt) return bOpt - aOpt;
+
+      const aLoc = a.food.regions.includes(countryId) ? 1 : 0;
+      const bLoc = b.food.regions.includes(countryId) ? 1 : 0;
+      if (bLoc !== aLoc) return bLoc - aLoc;
+      return b.food.qualityScore - a.food.qualityScore;
+    })
+    .map(item => item.food);
+}
+
+/**
+ * Analiza médicamente todos los registros de comida de un día (Carga Glucémica,
+ * Razón Sodio/Potasio, Sinergia Hierro + Vitamina C, Omega-3, Fibra y Crononutrición).
+ */
+export function analyzeDayClinicalMetrics({ dayLogs = [], userProfile = {} }) {
+  const protocols = resolveUserClinicalProtocols(userProfile);
+  const targets = userProfile?.clinicalTargets || {
+    fiberGrams: 28,
+    sodiumMaxMg: 2000,
+    potassiumTargetMg: 3500,
+    omega3TargetMg: 1000,
+    ironTargetMg: 14,
+    calciumTargetMg: 1000,
+    vitaminCTargetMg: 85,
+    glycemicLoadMaxDaily: 100
+  };
+
+  let totalKcal = 0;
+  let totalProtein = 0;
+  let totalCarbs = 0;
+  let totalFat = 0;
+  let totalFiber = 0;
+  let totalSodiumMg = 0;
+  let totalPotassiumMg = 0;
+  let totalIronMg = 0;
+  let totalCalciumMg = 0;
+  let totalVitaminCMg = 0;
+  let totalOmega3Mg = 0;
+  let totalGlycemicLoad = 0;
+  let anabolicMealsCount = 0;
+  let dinnerKcal = 0;
+
+  const byMealType = { Desayuno: [], Almuerzo: [], Merienda: [], Cena: [] };
+
+  dayLogs.forEach(entry => {
+    const refFood = entry.foodId
+      ? GLOBAL_FOOD_DATABASE.find(f => f.id === entry.foodId)
+      : null;
+    const scaled = refFood ? scaleFoodPortion(refFood, entry.grams || 100) : null;
+
+    const kcal = Number(entry.kcal ?? entry.totalCalories) || 0;
+    const protein = Number(entry.protein ?? entry.proteinGrams) || 0;
+    const carbs = Number(entry.carbs ?? entry.carbsGrams) || 0;
+    const fat = Number(entry.fat ?? entry.fatGrams) || 0;
+    const fiber = Number(entry.fiber ?? entry.fiberGrams ?? scaled?.fiber) || 0;
+    const sodiumMg = Number(entry.sodiumMg ?? scaled?.sodiumMg) || Math.round(kcal * 0.65);
+    const potassiumMg = Number(entry.potassiumMg ?? scaled?.potassiumMg) || Math.round(kcal * 1.3);
+    const ironMg = Number(entry.ironMg ?? scaled?.ironMg) || Number((kcal * 0.005).toFixed(1));
+    const calciumMg = Number(entry.calciumMg ?? scaled?.calciumMg) || Math.round(kcal * 0.35);
+    const vitaminCMg = Number(entry.vitaminCMg ?? scaled?.vitaminCMg) || 0;
+    const omega3Mg = Number(entry.omega3Mg ?? scaled?.omega3Mg) || 0;
+    const netCarbs = Math.max(0, carbs - fiber);
+    const glycemicLoad =
+      Number(entry.glycemicLoad ?? scaled?.glycemicLoad) || Number(((netCarbs * 48) / 100).toFixed(1));
+
+    totalKcal += kcal;
+    totalProtein += protein;
+    totalCarbs += carbs;
+    totalFat += fat;
+    totalFiber += fiber;
+    totalSodiumMg += sodiumMg;
+    totalPotassiumMg += potassiumMg;
+    totalIronMg = Number((totalIronMg + ironMg).toFixed(1));
+    totalCalciumMg += calciumMg;
+    totalVitaminCMg += vitaminCMg;
+    totalOmega3Mg += omega3Mg;
+    totalGlycemicLoad = Number((totalGlycemicLoad + glycemicLoad).toFixed(1));
+
+    if (entry.mealType === 'Cena') {
+      dinnerKcal += kcal;
+    }
+    if (byMealType[entry.mealType]) {
+      byMealType[entry.mealType].push({
+        ...entry,
+        protein,
+        ironMg,
+        vitaminCMg,
+        sodiumMg,
+        glycemicLoad
+      });
+    }
   });
+
+  Object.values(byMealType).forEach(items => {
+    const mealProt = items.reduce((s, i) => s + i.protein, 0);
+    if (mealProt >= 24) anabolicMealsCount += 1;
+  });
+
+  const naKRatio = totalPotassiumMg > 0 ? Number((totalSodiumMg / totalPotassiumMg).toFixed(2)) : 0;
+  const glycemicLoadLevel =
+    totalGlycemicLoad <= 75 ? 'Baja (Estable)' : totalGlycemicLoad <= 110 ? 'Moderada' : 'Alta (Vigilar picos)';
+  const ironSynergyActive = totalIronMg >= 4 && totalVitaminCMg >= 25;
+
+  const clinicalFindings = [];
+  if (dayLogs.length > 0) {
+    if (totalSodiumMg > targets.sodiumMaxMg) {
+      clinicalFindings.push(
+        `Alerta DASH/KDIGO: el sodio registrado (${totalSodiumMg} mg) supera tu tope diario (${targets.sodiumMaxMg} mg). Hidrátate y prioriza vegetales frescos sin sal añadida.`
+      );
+    }
+    if (totalIronMg >= 3.5 && totalVitaminCMg < 20) {
+      clinicalFindings.push(
+        `Sinergia de Hierro OMS: llevas ${totalIronMg} mg de hierro pero poca Vitamina C (${totalVitaminCMg} mg). Agrega limón, guayaba, naranja o pimiento para triplicar su absorción.`
+      );
+    }
+    if (totalGlycemicLoad > targets.glycemicLoadMaxDaily) {
+      clinicalFindings.push(
+        `Control Glucémico ADA: la carga glucémica acumulada (${totalGlycemicLoad}) es elevada. Acompaña tu próxima toma con fibra soluble y camina 10–15 min.`
+      );
+    }
+    if (dinnerKcal > totalKcal * 0.42 && totalKcal > 900) {
+      clinicalFindings.push(
+        `Crononutrición ESPEN: la cena concentra más del 40% de tus calorías del día. Repartir más energía en desayuno y almuerzo mejora la sensibilidad a la insulina.`
+      );
+    }
+  }
+
+  return {
+    totals: {
+      kcal: totalKcal,
+      protein: totalProtein,
+      carbs: totalCarbs,
+      fat: totalFat,
+      fiber: totalFiber,
+      sodiumMg: totalSodiumMg,
+      potassiumMg: totalPotassiumMg,
+      ironMg: totalIronMg,
+      calciumMg: totalCalciumMg,
+      vitaminCMg: totalVitaminCMg,
+      omega3Mg: totalOmega3Mg,
+      glycemicLoad: totalGlycemicLoad
+    },
+    targets,
+    naKRatio,
+    glycemicLoadLevel,
+    ironSynergyActive,
+    anabolicMealsCount,
+    clinicalFindings,
+    protocols
+  };
 }
 
 /**

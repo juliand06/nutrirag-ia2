@@ -175,7 +175,10 @@ const NUTRITION_KEYWORDS = [
   'cansancio', 'sodio', 'potasio', 'dash', 'ada', 'oms', 'issn', 'medico', 'clinico', 'condicion',
   'memoria', 'historial', 'evolucion', 'tendencia', 'conoces', 'habito', 'sueno', 'cortisol',
   'clinica', 'hospital', 'laboratorio', 'examen', 'hba1c', 'ldl', 'hdl', 'hemoglobina',
-  'alergia', 'medicamento', 'metformina', 'losartan', 'levotiroxina', 'estatina', 'expediente', 'rubrica', 'gmail'
+  'alergia', 'medicamento', 'metformina', 'losartan', 'levotiroxina', 'estatina', 'expediente', 'rubrica', 'gmail',
+  'hipotiroidismo', 'tiroides', 'sop', 'ovario', 'poliquistico', 'celiaca', 'celiaquia', 'tacc',
+  'warfarina', 'anticoagulante', 'enalapril', 'atorvastatina', 'simvastatina', 'inositol',
+  'sarcopenia', 'kdigo', 'easl', 'ata', 'eshre', 'hiperpotasemia', 'toronja', 'pomelo', 'fosforo', 'fructosa', 'renal', 'higado'
 ];
 
 const OFF_TOPIC_TRIGGERS = [
@@ -457,8 +460,10 @@ export async function runHybridRagQuery(
     };
   }
 
-  // Caché de consultas repetidas en el mismo estado diario (0 tokens)
-  const cacheKey = `${userProfile?.id || 'anon'}|${userProfile?.country || 'CO'}|${dailyTracking?.consumedKcal || 0}|${normalizeText(question).trim()}`;
+  // Caché de consultas repetidas en el mismo estado diario y perfil clínico (0 tokens)
+  const allergyKey = Array.isArray(userProfile?.allergies) ? userProfile.allergies.join(',') : '';
+  const condKey = Array.isArray(userProfile?.medicalConditions) ? userProfile.medicalConditions.join(',') : '';
+  const cacheKey = `${userProfile?.id || 'anon'}|${userProfile?.country || 'CO'}|${userProfile?.dietType || 'omnivora'}|${allergyKey}|${userProfile?.dislikedFoods || ''}|${condKey}|${dailyTracking?.consumedKcal || 0}|${normalizeText(question).trim()}`;
   if (QUERY_RESPONSE_CACHE.has(cacheKey)) {
     const cached = QUERY_RESPONSE_CACHE.get(cacheKey);
     return {

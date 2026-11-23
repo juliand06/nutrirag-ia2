@@ -23,10 +23,13 @@ export async function lookupBarcodeOpenFoodFacts(barcode) {
     throw new Error('Ingresa un código de barras válido (mínimo 6 dígitos).');
   }
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4500);
   const res = await fetch(
     `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(clean)}.json`,
-    { headers: { Accept: 'application/json' } }
+    { headers: { Accept: 'application/json' }, signal: controller.signal }
   );
+  clearTimeout(timer);
   if (!res.ok) {
     throw new Error('No se pudo consultar Open Food Facts en este momento.');
   }
@@ -37,19 +40,32 @@ export async function lookupBarcodeOpenFoodFacts(barcode) {
 
   const p = data.product;
   const n = p.nutriments || {};
-  const kcal = Math.round(Number(n['energy-kcal_100g'] || n['energy-kcal'] || 0));
+  const kcal = Math.round(
+    Number(n['energy-kcal_100g'] || n['energy-kcal'] || (Number(n.energy_100g || 0) / 4.184) || 0)
+  );
   const carbs = Math.round(Number(n.carbohydrates_100g || 0));
   const protein = Math.round(Number(n.proteins_100g || 0));
   const fat = Math.round(Number(n.fat_100g || 0));
   const fiber = Math.round(Number(n.fiber_100g || 0));
   const sugar = Math.round(Number(n.sugars_100g || 0));
-  const sodiumMg = Math.round(Number(n.sodium_100g || 0) * 1000);
+  const sodiumMg =
+    n.sodium_100g !== undefined
+      ? Math.round(Number(n.sodium_100g || 0) * 1000)
+      : Math.round(Number(n.salt_100g || 0) * 400);
   const nutriGrade = (p.nutriscore_grade || 'c').toUpperCase();
   const validGrade = ['A', 'B', 'C', 'D', 'E'].includes(nutriGrade) ? nutriGrade : 'C';
   const novaGroup = Number(p.nova_group) || 3;
   const additives = Array.isArray(p.additives_tags)
     ? p.additives_tags.map(t => t.replace(/^en:/, '').toUpperCase())
     : [];
+  const allergensTags = Array.isArray(p.allergens_tags)
+    ? p.allergens_tags.map(t => t.replace(/^[a-z]{2}:/, '').toLowerCase())
+    : [];
+  const tracesTags = Array.isArray(p.traces_tags)
+    ? p.traces_tags.map(t => t.replace(/^[a-z]{2}:/, '').toLowerCase())
+    : [];
+  const ingredientsText = p.ingredients_text_es || p.ingredients_text || '';
+  const allergensVerified = Boolean(allergensTags.length > 0 && ingredientsText.length > 3);
 
   const qualityScore = computeYukaScore({
     nutriGrade: validGrade,
@@ -81,7 +97,13 @@ export async function lookupBarcodeOpenFoodFacts(barcode) {
     nutriGrade: validGrade,
     novaGroup,
     qualityScore,
-    ingredientsText: p.ingredients_text_es || p.ingredients_text || 'Ingredientes no especificados en etiqueta.',
+    ingredientsText: ingredientsText || 'Ingredientes no especificados en etiqueta.',
+    allergens: allergensTags,
+    allergensTags,
+    traces: tracesTags,
+    tracesTags,
+    isExternalScan: true,
+    allergensVerified,
     additives,
     alternatives
   };

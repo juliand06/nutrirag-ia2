@@ -1,6 +1,31 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useNutriStore } from '../store/useNutriStore';
+import {
+  resolveUserClinicalProtocols,
+  resolveDrugNutrientInteractions
+} from '../lib/proactiveAiEngine';
+
+const PROFILE_HEALTH_CONDITIONS = [
+  { id: 'ninguna', label: 'Ninguna en particular' },
+  { id: 'diabetes', label: 'Diabetes / Resistencia a insulina (ADA)' },
+  { id: 'hipertension', label: 'Hipertensión arterial (DASH)' },
+  { id: 'colesterol', label: 'Colesterol, triglicéridos o hígado graso (AHA/EASL)' },
+  { id: 'tiroides', label: 'Hipotiroidismo / Tiroides (ATA)' },
+  { id: 'sop', label: 'Síndrome de Ovario Poliquístico — SOP (ESHRE)' },
+  { id: 'gastritis', label: 'Gastritis o colon irritable' },
+  { id: 'anemia', label: 'Anemia ferropénica o fatiga (OMS)' },
+  { id: 'renal', label: 'Protección renal (KDIGO)' }
+];
+
+const PROFILE_ALLERGIES = [
+  'Lactosa / Lácteos',
+  'Gluten / Trigo',
+  'Maní / Frutos secos',
+  'Mariscos / Pescado',
+  'Huevo',
+  'Soya'
+];
 
 export default function ProfilePage() {
   const navigate = useNavigate();
@@ -21,8 +46,45 @@ export default function ProfilePage() {
   const [weightKg, setWeightKg] = useState(currentUser?.weightKg || 67);
   const [targetWeightKg, setTargetWeightKg] = useState(currentUser?.targetWeightKg || 64);
   const [dailyCalories, setDailyCalories] = useState(currentUser?.dailyCalories || 1950);
+  const [dietType, setDietType] = useState(currentUser?.dietType || 'omnivora');
+  const [healthConditions, setHealthConditions] = useState(
+    Array.isArray(currentUser?.healthConditions) ? currentUser.healthConditions : ['ninguna']
+  );
+  const [allergies, setAllergies] = useState(
+    Array.isArray(currentUser?.allergies) ? currentUser.allergies : []
+  );
   const [dislikedFoods, setDislikedFoods] = useState(currentUser?.dislikedFoods || '');
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const activeProtocols = resolveUserClinicalProtocols({
+    ...currentUser,
+    dietType,
+    healthConditions,
+    allergies
+  });
+  const activeDrugAlerts = resolveDrugNutrientInteractions(activeProtocols);
+
+  const toggleCondition = (id) => {
+    if (id === 'ninguna') {
+      setHealthConditions(['ninguna']);
+      return;
+    }
+    const withoutNone = healthConditions.filter(c => c !== 'ninguna');
+    if (withoutNone.includes(id)) {
+      const next = withoutNone.filter(c => c !== id);
+      setHealthConditions(next.length ? next : ['ninguna']);
+    } else {
+      setHealthConditions([...withoutNone, id]);
+    }
+  };
+
+  const toggleAllergy = (al) => {
+    if (allergies.includes(al)) {
+      setAllergies(allergies.filter(a => a !== al));
+    } else {
+      setAllergies([...allergies, al]);
+    }
+  };
 
   const handleSaveProfile = (e) => {
     e.preventDefault();
@@ -32,9 +94,12 @@ export default function ProfilePage() {
       weightKg: Number(weightKg),
       targetWeightKg: Number(targetWeightKg),
       dailyCalories: Number(dailyCalories),
+      dietType,
+      healthConditions,
+      allergies,
       dislikedFoods
     });
-    showToast('Tus datos y metas se actualizaron correctamente.', 'emerald');
+    showToast('Tus datos clínicos, alergias y plan semanal se actualizaron.', 'emerald');
   };
 
   const handleExportData = () => {
@@ -153,6 +218,68 @@ export default function ProfilePage() {
           </div>
 
           <div>
+            <label htmlFor="prof-diet" style={{ display: 'block', fontWeight: 600, fontSize: '0.88rem', marginBottom: '4px' }}>
+              Estilo de alimentación
+            </label>
+            <select
+              id="prof-diet"
+              className="ns-input"
+              value={dietType}
+              onChange={e => setDietType(e.target.value)}
+            >
+              <option value="omnivora">Omnívora</option>
+              <option value="vegetariana">Vegetariana</option>
+              <option value="vegana">Vegana (100% vegetal)</option>
+              <option value="sin_gluten">Sin gluten (TACC)</option>
+              <option value="sin_lactosa">Sin lactosa</option>
+            </select>
+          </div>
+
+          <div>
+            <div style={{ fontWeight: 600, fontSize: '0.88rem', marginBottom: '6px' }}>
+              Condiciones médicas y protocolos activos
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+              {PROFILE_HEALTH_CONDITIONS.map(c => {
+                const active = healthConditions.includes(c.id);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => toggleCondition(c.id)}
+                    className={`ns-chip ${active ? 'ns-chip-active' : ''}`}
+                    style={{ fontSize: '0.78rem', padding: '5px 10px' }}
+                  >
+                    {c.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontWeight: 600, fontSize: '0.88rem', marginBottom: '6px' }}>
+              Alergias e intolerancias alimentarias
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+              {PROFILE_ALLERGIES.map(al => {
+                const active = allergies.includes(al);
+                return (
+                  <button
+                    key={al}
+                    type="button"
+                    onClick={() => toggleAllergy(al)}
+                    className={`ns-chip ${active ? 'ns-chip-active' : ''}`}
+                    style={{ fontSize: '0.78rem', padding: '5px 10px' }}
+                  >
+                    {al}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
             <label htmlFor="prof-disliked" style={{ display: 'block', fontWeight: 600, fontSize: '0.88rem', marginBottom: '4px' }}>
               Alimentos o ingredientes que prefiero evitar
             </label>
@@ -167,12 +294,30 @@ export default function ProfilePage() {
           </div>
 
           <button type="submit" className="ns-btn ns-btn-leaf ns-btn-md">
-            Guardar cambios
+            Guardar cambios y recalibrar plan
           </button>
         </form>
 
-        {/* Preferencias, transparencia clínica y privacidad */}
+        {/* Preferencias, ficha clínica activa, transparencia FHIR y privacidad */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+          {/* Ficha clínica activa y farmacovigilancia */}
+          <section className="ns-card ns-card-sage">
+            <h2 style={{ fontSize: '1.18rem', marginBottom: '8px', color: 'var(--brand-leaf)' }}>
+              Ficha Clínica Nutricional Activa
+            </h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
+              {activeProtocols.map(p => (
+                <div key={p.id}>
+                  <strong style={{ color: 'var(--text-primary)' }}>• {p.label} ({p.source}):</strong> {p.keyRules}
+                </div>
+              ))}
+              {activeDrugAlerts.map(d => (
+                <div key={d.conditionId} style={{ marginTop: '4px', padding: '8px 10px', borderRadius: '8px', backgroundColor: 'var(--bg-surface)', borderLeft: '3px solid var(--accent-carrot)' }}>
+                  <strong>Farmacovigilancia ({d.medications}):</strong> {d.interactionRule}
+                </div>
+              ))}
+            </div>
+          </section>
           <section className="ns-card">
             <h2 style={{ fontSize: '1.25rem', marginBottom: '12px' }}>Ajustes de la aplicación</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>

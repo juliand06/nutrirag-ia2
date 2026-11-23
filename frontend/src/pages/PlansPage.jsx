@@ -161,7 +161,7 @@ export default function PlansPage() {
                   {meal.dishName}
                 </h2>
                 <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                  {meal.protein}g proteína · {meal.carbs}g carbos · {meal.fat}g grasas
+                  {meal.protein}g proteína · {meal.carbs}g carbos · {meal.fat}g grasas · {meal.fiber || 0}g fibra
                 </div>
               </div>
             </div>
@@ -181,11 +181,18 @@ export default function PlansPage() {
                   addMealEntry({
                     mealType: meal.mealType,
                     dishName: meal.dishName,
-                    grams: 320,
+                    grams: meal.grams || 320,
                     kcal: meal.kcal,
                     carbs: meal.carbs,
                     protein: meal.protein,
                     fat: meal.fat,
+                    fiber: meal.fiber || 0,
+                    sodiumMg: meal.sodiumMg || 0,
+                    potassiumMg: meal.potassiumMg || 0,
+                    ironMg: meal.ironMg || 0,
+                    vitaminCMg: meal.vitaminCMg || 0,
+                    omega3Mg: meal.omega3Mg || 0,
+                    glycemicLoad: meal.glycemicLoad || 0,
                     image: meal.image
                   })
                 }

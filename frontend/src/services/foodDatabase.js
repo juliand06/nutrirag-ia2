@@ -232,7 +232,7 @@ export const GLOBAL_FOOD_DATABASE = [
     category: 'Carbohidratos',
     regions: ['CO', 'EC', 'PE', 'MX'],
     defaultGrams: 120,
-    kcal: 116, carbs: 31, protein: 1.3, fat: 0.2, fiber: 2.3, sugar: 12,
+    kcal: 116, carbs: 31, protein: 1.3, fat: 0.2, fiber: 2.3, sugar: 1.8,
     sodiumMg: 4, potassiumMg: 465, ironMg: 0.6, calciumMg: 3, vitaminCMg: 18, omega3Mg: 10,
     qualityScore: 91, nutriGrade: 'A', novaGroup: 1, glycemicIndex: 'Bajo',
     clinicalTag: 'Almidón resistente prebiótico + alto potasio'
@@ -569,18 +569,30 @@ export const GLOBAL_FOOD_DATABASE = [
 export function scaleFoodPortion(food, grams) {
   const g = Math.max(1, Number(grams) || food.defaultGrams || 100);
   const factor = g / 100;
+  const carbs = Math.round((Number(food.carbs) || 0) * factor);
+  const fiber = Math.round((Number(food.fiber) || 0) * factor);
+  const netCarbs = Math.max(0, carbs - fiber);
+  const giNumeric =
+    food.glycemicIndex === 'Alto' ? 74 : food.glycemicIndex === 'Medio' ? 56 : 36;
+  const glycemicLoad = Number(((giNumeric * netCarbs) / 100).toFixed(1));
+
   return {
     grams: g,
-    kcal: Math.round(food.kcal * factor),
-    carbs: Math.round(food.carbs * factor),
-    protein: Math.round(food.protein * factor),
-    fat: Math.round(food.fat * factor),
-    fiber: Math.round(food.fiber * factor),
-    sugar: Math.round(food.sugar * factor),
-    sodiumMg: Math.round(food.sodiumMg * factor),
-    potassiumMg: Math.round(food.potassiumMg * factor),
-    ironMg: Number((food.ironMg * factor).toFixed(1)),
-    vitaminCMg: Math.round(food.vitaminCMg * factor)
+    kcal: Math.round((Number(food.kcal) || 0) * factor),
+    carbs,
+    protein: Math.round((Number(food.protein) || 0) * factor),
+    fat: Math.round((Number(food.fat) || 0) * factor),
+    fiber,
+    sugar: Math.round((Number(food.sugar) || 0) * factor),
+    sodiumMg: Math.round((Number(food.sodiumMg) || 0) * factor),
+    potassiumMg: Math.round((Number(food.potassiumMg) || 0) * factor),
+    ironMg: Number(((Number(food.ironMg) || 0) * factor).toFixed(1)),
+    calciumMg: Math.round((Number(food.calciumMg) || 0) * factor),
+    vitaminCMg: Math.round((Number(food.vitaminCMg) || 0) * factor),
+    omega3Mg: Math.round((Number(food.omega3Mg) || 0) * factor),
+    glycemicLoad,
+    glycemicIndex: food.glycemicIndex || 'Bajo',
+    novaGroup: food.novaGroup || 1
   };
 }
 

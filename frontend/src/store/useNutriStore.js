@@ -63,8 +63,9 @@ function loadWorkspaceForUser(user) {
   }
   const initialPlan = generateWeeklyPlan({
     targetCalories: user.dailyCalories || 1950,
-    dietStyle: user.dietType === 'vegetariana' || user.dietType === 'vegana' ? 'vegetariana' : 'equilibrada',
-    countryId: user.country || 'CO'
+    dietStyle: user.dietType || 'equilibrada',
+    countryId: user.country || 'CO',
+    userProfile: user
   });
 
   const initialWs = {
@@ -174,15 +175,38 @@ export const useNutriStore = create((set, get) => {
           heightUnit: 'cm',
           weightUnit: 'kg'
         });
+        const finalDailyCalories = recalculated.safetyAdvisoryActive
+          ? recalculated.dailyCalories
+          : patch.dailyCalories ?? recalculated.dailyCalories;
+
         const nextUser = {
           ...merged,
-          dailyCalories: patch.dailyCalories ?? recalculated.dailyCalories,
+          dailyCalories: finalDailyCalories,
           targetCarbs: patch.targetCarbs ?? recalculated.targetCarbs,
           targetProtein: patch.targetProtein ?? recalculated.targetProtein,
           targetFat: patch.targetFat ?? recalculated.targetFat,
-          waterGoalMl: patch.waterGoalMl ?? recalculated.waterGoalMl
+          waterGoalMl: patch.waterGoalMl ?? recalculated.waterGoalMl,
+          bmi: recalculated.bmi,
+          targetBmi: recalculated.targetBmi,
+          clinicalTargets: recalculated.clinicalTargets,
+          hideCalorieNumbersMode: recalculated.hideCalorieNumbersMode,
+          safetyAdvisoryActive: recalculated.safetyAdvisoryActive,
+          safetyReasons: recalculated.safetyReasons,
+          safetyMessage: recalculated.safetyMessage
         };
         saveStoredSessionProfile(nextUser);
+
+        if (state.workspace) {
+          const updatedPlan = generateWeeklyPlan({
+            targetCalories: nextUser.dailyCalories || 1950,
+            dietStyle: nextUser.dietType || 'equilibrada',
+            countryId: nextUser.country || 'CO',
+            userProfile: nextUser
+          });
+          const nextWs = { ...state.workspace, weeklyPlan: updatedPlan };
+          persistWorkspace(nextUser.id, nextWs);
+          return { currentUser: nextUser, workspace: nextWs };
+        }
         return { currentUser: nextUser };
       }),
 
@@ -205,6 +229,13 @@ export const useNutriStore = create((set, get) => {
           protein: Math.round(Number(mealEntry.protein) || 0),
           fat: Math.round(Number(mealEntry.fat) || 0),
           fiber: Math.round(Number(mealEntry.fiber) || 0),
+          sodiumMg: Math.round(Number(mealEntry.sodiumMg) || 0),
+          potassiumMg: Math.round(Number(mealEntry.potassiumMg) || 0),
+          ironMg: Number((Number(mealEntry.ironMg) || 0).toFixed(1)),
+          calciumMg: Math.round(Number(mealEntry.calciumMg) || 0),
+          vitaminCMg: Math.round(Number(mealEntry.vitaminCMg) || 0),
+          omega3Mg: Math.round(Number(mealEntry.omega3Mg) || 0),
+          glycemicLoad: Number((Number(mealEntry.glycemicLoad) || 0).toFixed(1)),
           image: mealEntry.image || '/img/plato-almuerzo.webp',
           foodId: mealEntry.foodId || null
         };
@@ -234,10 +265,18 @@ export const useNutriStore = create((set, get) => {
           return {
             ...item,
             grams: g,
-            kcal: Math.round(item.kcal * ratio),
-            carbs: Math.round(item.carbs * ratio),
-            protein: Math.round(item.protein * ratio),
-            fat: Math.round(item.fat * ratio)
+            kcal: Math.round((item.kcal || 0) * ratio),
+            carbs: Math.round((item.carbs || 0) * ratio),
+            protein: Math.round((item.protein || 0) * ratio),
+            fat: Math.round((item.fat || 0) * ratio),
+            fiber: Math.round((item.fiber || 0) * ratio),
+            sodiumMg: Math.round((item.sodiumMg || 0) * ratio),
+            potassiumMg: Math.round((item.potassiumMg || 0) * ratio),
+            ironMg: Number(((item.ironMg || 0) * ratio).toFixed(1)),
+            calciumMg: Math.round((item.calciumMg || 0) * ratio),
+            vitaminCMg: Math.round((item.vitaminCMg || 0) * ratio),
+            omega3Mg: Math.round((item.omega3Mg || 0) * ratio),
+            glycemicLoad: Number(((item.glycemicLoad || 0) * ratio).toFixed(1))
           };
         });
         const nextWs = { ...state.workspace, mealLogs: nextLogs };

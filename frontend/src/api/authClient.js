@@ -164,7 +164,11 @@ export async function registerWithOnboarding({
     targetFat: Number(computedPlan.targetFat) || 62,
     waterGoalMl: Number(computedPlan.waterGoalMl) || 2200,
     bmi: Number(computedPlan.bmi) || 22.8,
+    targetBmi: Number(computedPlan.targetBmi) || 22.0,
+    clinicalTargets: computedPlan.clinicalTargets || null,
+    hideCalorieNumbersMode: Boolean(computedPlan.hideCalorieNumbersMode),
     safetyAdvisoryActive: Boolean(computedPlan.safetyAdvisoryActive),
+    safetyReasons: Array.isArray(computedPlan.safetyReasons) ? computedPlan.safetyReasons : [],
     safetyMessage: computedPlan.safetyMessage || null,
     profileConfigured: true,
     createdAt: getLocalTodayIso()
