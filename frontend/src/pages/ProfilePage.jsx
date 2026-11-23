@@ -210,7 +210,7 @@ export default function ProfilePage() {
               type="number"
               min="1200"
               max="4500"
-              step="50"
+              step="1"
               className="ns-input"
               value={dailyCalories}
               onChange={e => setDailyCalories(e.target.value)}
