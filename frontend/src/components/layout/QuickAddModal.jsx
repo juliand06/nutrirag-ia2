@@ -4,7 +4,7 @@ import { useNutriStore } from '../../store/useNutriStore';
 import { GLOBAL_FOOD_DATABASE, scaleFoodPortion } from '../../lib/foodDatabase';
 import { getSafeFoodsForUser } from '../../lib/proactiveAiEngine';
 import { getLocalTodayIso } from '../../lib/nutritionCalculator';
-import { MEAL_PRESETS } from '../../lib/nutriRagEngine';
+import MealPhotoAnalyzer from '../MealPhotoAnalyzer';
 
 export default function QuickAddModal() {
   const navigate = useNavigate();
@@ -112,7 +112,13 @@ export default function QuickAddModal() {
     >
       <div
         className="ns-card ns-card-organic"
-        style={{ maxWidth: '520px', width: '100%', padding: '26px' }}
+        style={{
+          maxWidth: '560px',
+          width: '100%',
+          maxHeight: '90vh',
+          overflowY: 'auto',
+          padding: '26px'
+        }}
         onClick={e => e.stopPropagation()}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
@@ -226,33 +232,18 @@ export default function QuickAddModal() {
         )}
 
         {tab === 'photo' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <p style={{ margin: 0, fontSize: '0.92rem', color: 'var(--text-secondary)' }}>
-              Selecciona una fotografía de tu plato o prueba con uno de nuestros platos caseros analizados por visión:
-            </p>
-            {MEAL_PRESETS.filter(p => p.analysis.isFoodValid).map(preset => (
-              <button
-                key={preset.id}
-                type="button"
-                onClick={() => handlePhotoPreset(preset)}
-                className="ns-card"
-                style={{
-                  textAlign: 'left',
-                  padding: '12px 16px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center'
-                }}
-              >
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{preset.title}</div>
-                  <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>{preset.badge}</div>
-                </div>
-                <span style={{ color: 'var(--brand-leaf)', fontWeight: 700 }}>+ Agregar</span>
-              </button>
-            ))}
-          </div>
+          <MealPhotoAnalyzer
+            mealType={mealType}
+            onMealTypeChange={setMealType}
+            userProfile={currentUser || {}}
+            onSaveMeal={(mealPayload) => {
+              addMealEntry({
+                date: today,
+                ...mealPayload
+              });
+              setQuickAddOpen(false);
+            }}
+          />
         )}
       </div>
     </div>
