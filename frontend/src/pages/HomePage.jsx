@@ -37,31 +37,16 @@ export default function HomePage() {
   const kcalPct = Math.min(100, Math.round((consumed.kcal / Math.max(1, goalKcal)) * 100));
   const remainingKcal = ctx.remaining.kcal;
 
-  // Racha de días con registro
-  const distinctDates = new Set((workspace?.mealLogs || []).map(m => m.date));
-  const streakDays = Math.max(1, distinctDates.size);
-
-  // Anillo SVG
-  const radius = 68;
+  const radius = 58;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (kcalPct / 100) * circumference;
 
   const suggestedDish = roadmap.recommendedMeal;
-
-  const handleActionClick = (action) => {
-    if (action.actionType === 'log_meal' && action.mealPayload) {
-      addMealEntry({
-        date: today,
-        ...action.mealPayload
-      });
-    } else if (action.actionType === 'add_water') {
-      setWaterGlassesForDate(today, waterGlassesToday + 1);
-    }
-  };
+  const hideNumbers = Boolean(currentUser?.hideCalorieNumbersMode);
 
   return (
-    <div>
-      {/* Encabezado cálido por nombre y hora */}
+    <div style={{ maxWidth: '980px', margin: '0 auto' }}>
+      {/* Encabezado limpio y sereno */}
       <div
         style={{
           display: 'flex',
@@ -73,23 +58,12 @@ export default function HomePage() {
         }}
       >
         <div>
-          <span
-            style={{
-              fontSize: '0.85rem',
-              fontWeight: 700,
-              color: 'var(--accent-earth)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em'
-            }}
-          >
-            {currentUser?.city || country.name} · Racha activa: {streakDays} {streakDays === 1 ? 'día' : 'días'}
-          </span>
-          <h1 style={{ fontSize: 'clamp(1.75rem, 3vw, 2.35rem)', marginBottom: '4px', marginTop: '4px' }}>
+          <h1 style={{ fontSize: 'clamp(1.8rem, 3vw, 2.3rem)', marginBottom: '4px' }}>
             {getGreetingByHour()}, {firstName}!
-            <HandUnderline color="#D95D24" style={{ maxWidth: '190px', marginTop: '2px' }} />
+            <HandUnderline color="#B84714" style={{ maxWidth: '180px', marginTop: '2px' }} />
           </h1>
-          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '1rem' }}>
-            Tu IA analizó tus 13 datos clínicos y tu progreso de hoy para guiarte paso a paso sin que tengas que preguntar.
+          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.98rem' }}>
+            ¿Cómo quieres cuidar tu alimentación hoy?
           </p>
         </div>
 
@@ -99,398 +73,174 @@ export default function HomePage() {
             onClick={() => setQuickAddOpen(true)}
             className="ns-btn ns-btn-carrot ns-btn-md"
           >
-            + Registrar comida
+            + Registrar o tomar foto
           </button>
-          <Link to="/app/coach" className="ns-btn ns-btn-outline ns-btn-md">
-            Preguntar al Coach IA
+          <Link to="/app/coach" className="ns-btn ns-btn-leaf ns-btn-md">
+            Hablar con mi Coach IA
           </Link>
         </div>
       </div>
 
-      {/* Si se activó regla de seguridad en el onboarding, recordatorio cálido */}
+      {/* Aviso cálido solo si hay alerta de seguridad clínica */}
       {currentUser?.safetyAdvisoryActive && (
         <div
           className="ns-card ns-card-warm"
-          style={{ marginBottom: '24px', borderColor: 'var(--accent-carrot)' }}
+          style={{ marginBottom: '22px', borderColor: 'var(--accent-carrot)', padding: '16px 20px' }}
         >
-          <strong style={{ color: 'var(--accent-carrot)' }}>Modo de cuidado y orientación educativa:</strong>{' '}
-          <span style={{ color: 'var(--text-secondary)', fontSize: '0.94rem' }}>
+          <strong style={{ color: 'var(--accent-carrot)' }}>Modo de cuidado educativo:</strong>{' '}
+          <span style={{ color: 'var(--text-secondary)', fontSize: '0.92rem' }}>
             {currentUser.safetyMessage}
           </span>
         </div>
       )}
 
-      {/* NUEVO PANEL PRINCIPAL: TU RUTA CLÍNICA PROACTIVA DE HOY (SIN NECESIDAD DE PREGUNTAR) */}
-      <section
-        className="ns-card ns-card-organic ns-card-warm"
-        style={{ padding: '24px', marginBottom: '26px', border: '1.5px solid var(--border-strong)' }}
+      {/* Bloque principal enfocado: 2 tarjetas serenas (Resumen de hoy + Tu próxima comida) */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))',
+          gap: '22px',
+          marginBottom: '24px'
+        }}
       >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            flexWrap: 'wrap',
-            gap: '12px',
-            marginBottom: '16px'
-          }}
-        >
-          <div>
-            <span
-              style={{
-                display: 'inline-block',
-                padding: '4px 12px',
-                borderRadius: '999px',
-                backgroundColor: 'var(--brand-leaf)',
-                color: '#FFFFFF',
-                fontSize: '0.78rem',
-                fontWeight: 700,
-                marginBottom: '8px'
-              }}
-            >
-              IA Clínica Proactiva · Qué hacer ahora ({roadmap.timeWindowLabel})
-            </span>
-            <h2 style={{ fontSize: '1.45rem', margin: 0 }}>
-              Tu guía automática para hoy basada en evidencia médica
-            </h2>
-            <p style={{ margin: '4px 0 0 0', fontSize: '0.86rem', color: 'var(--text-secondary)' }}>
-              Perfil analizado: {roadmap.profileAuditSummary}
-            </p>
-          </div>
-        </div>
-
-        {/* Las 3 decisiones proactivas que la IA toma por la persona hoy */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(270px, 1fr))',
-            gap: '16px',
-            marginBottom: '18px'
-          }}
-        >
-          {roadmap.immediateActions.map(action => (
-            <div
-              key={action.id}
-              className="ns-card"
-              style={{
-                padding: '18px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-                gap: '12px'
-              }}
-            >
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <span
-                    style={{
-                      fontSize: '0.75rem',
-                      fontWeight: 700,
-                      padding: '3px 10px',
-                      borderRadius: '999px',
-                      backgroundColor: 'var(--brand-leaf-soft)',
-                      color: 'var(--brand-leaf)'
-                    }}
-                  >
-                    {action.priority}
-                  </span>
-                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-                    {action.category}
-                  </span>
-                </div>
-                <h3 style={{ fontSize: '1.08rem', marginBottom: '6px', lineHeight: 1.35 }}>
-                  {action.title}
-                </h3>
-                <p style={{ margin: '0 0 8px 0', fontSize: '0.88rem', color: 'var(--text-secondary)' }}>
-                  {action.detail}
-                </p>
+        {/* Tarjeta 1: Tu día de un vistazo (Energía + Macros + Agua compacta) */}
+        <section className="ns-card ns-card-organic" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+            {!hideNumbers && (
+              <div
+                role="progressbar"
+                aria-valuenow={kcalPct}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label={`Energía de hoy: ${consumed.kcal} de ${goalKcal} kcal`}
+                style={{ position: 'relative', width: '136px', height: '136px', flexShrink: 0 }}
+              >
+                <svg width="136" height="136" viewBox="0 0 136 136" aria-hidden="true">
+                  <circle cx="68" cy="68" r={radius} fill="none" stroke="var(--bg-warm)" strokeWidth="11" />
+                  <motion.circle
+                    cx="68"
+                    cy="68"
+                    r={radius}
+                    fill="none"
+                    stroke="var(--brand-leaf)"
+                    strokeWidth="11"
+                    strokeLinecap="round"
+                    strokeDasharray={circumference}
+                    initial={{ strokeDashoffset: circumference }}
+                    animate={{ strokeDashoffset }}
+                    transition={{ duration: 0.6, ease: 'easeOut' }}
+                    transform="rotate(-90 68 68)"
+                  />
+                </svg>
                 <div
                   style={{
-                    fontSize: '0.78rem',
-                    color: 'var(--accent-earth)',
-                    borderTop: '1px dashed var(--border-warm)',
-                    paddingTop: '8px'
+                    position: 'absolute',
+                    inset: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    textAlign: 'center'
                   }}
                 >
-                  <strong>Respaldo clínico:</strong> {action.clinicalBasis}
+                  <span style={{ fontSize: '1.35rem', fontWeight: 700, fontFamily: 'var(--font-display)' }}>
+                    {consumed.kcal}
+                  </span>
+                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>de {goalKcal} kcal</span>
                 </div>
               </div>
+            )}
 
-              {action.actionType !== 'none' && (
-                <button
-                  type="button"
-                  onClick={() => handleActionClick(action)}
-                  className="ns-btn ns-btn-leaf ns-btn-sm"
-                  style={{ width: '100%' }}
-                >
-                  {action.actionLabel}
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* Línea de tiempo de las 4 etapas del día */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
-            gap: '10px',
-            paddingTop: '12px',
-            borderTop: '1px solid var(--border-warm)'
-          }}
-        >
-          {roadmap.dayTimeline.map(step => (
-            <div
-              key={step.period}
-              style={{
-                padding: '10px 12px',
-                borderRadius: '12px',
-                backgroundColor: step.done ? 'var(--bg-sage)' : 'var(--bg-surface)',
-                border: '1px solid',
-                borderColor: step.done ? 'var(--brand-leaf)' : 'var(--border-warm)',
-                fontSize: '0.83rem'
-              }}
-            >
-              <div style={{ fontWeight: 700, color: step.done ? 'var(--brand-leaf)' : 'var(--text-primary)', marginBottom: '2px' }}>
-                {step.done ? '✓ ' : '• '}
-                {step.period}
-              </div>
-              <div style={{ color: 'var(--text-secondary)' }}>{step.instruction}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Fila principal: Anillo de calorías animado + Macros + Hidratación */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(295px, 1fr))',
-          gap: '22px',
-          marginBottom: '26px'
-        }}
-      >
-        {/* Anillo de calorías */}
-        <section className="ns-card ns-card-organic" style={{ display: 'flex', alignItems: 'center', gap: '22px' }}>
-          <div style={{ position: 'relative', width: '160px', height: '160px', flexShrink: 0 }}>
-            <svg width="160" height="160" viewBox="0 0 160 160">
-              <circle
-                cx="80"
-                cy="80"
-                r={radius}
-                fill="none"
-                stroke="var(--bg-warm)"
-                strokeWidth="13"
-              />
-              <motion.circle
-                cx="80"
-                cy="80"
-                r={radius}
-                fill="none"
-                stroke="var(--brand-leaf)"
-                strokeWidth="13"
-                strokeLinecap="round"
-                strokeDasharray={circumference}
-                initial={{ strokeDashoffset: circumference }}
-                animate={{ strokeDashoffset }}
-                transition={{ duration: 0.7, ease: 'easeOut' }}
-                transform="rotate(-90 80 80)"
-              />
-            </svg>
-            <div
-              style={{
-                position: 'absolute',
-                inset: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                textAlign: 'center'
-              }}
-            >
-              <span style={{ fontSize: '1.5rem', fontWeight: 700, fontFamily: 'var(--font-display)' }}>
-                {consumed.kcal}
-              </span>
-              <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                de {goalKcal} kcal
-              </span>
+            <div style={{ flex: 1 }}>
+              <h2 style={{ fontSize: '1.22rem', marginBottom: '6px' }}>
+                {hideNumbers ? 'Tu balance de hoy' : 'Energía de hoy'}
+              </h2>
+              <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', margin: '0 0 10px 0' }}>
+                {consumed.kcal === 0
+                  ? 'Aún no has anotado comidas hoy. Puedes tomarle foto a tu plato o elegir una opción sugerida.'
+                  : hideNumbers
+                    ? `Has registrado ${ctx.todayMeals.length} comida(s) nutritiva(s) hoy.`
+                    : `Te quedan aprox. ${remainingKcal} kcal para completar tu jornada.`}
+              </p>
+              <Link to="/app/diario" style={{ fontWeight: 700, fontSize: '0.88rem' }}>
+                Abrir mi diario →
+              </Link>
             </div>
           </div>
 
-          <div>
-            <h2 style={{ fontSize: '1.22rem', marginBottom: '6px' }}>Energía de hoy</h2>
-            <p style={{ fontSize: '0.92rem', color: 'var(--text-secondary)', margin: '0 0 12px 0' }}>
-              {consumed.kcal === 0
-                ? 'Aún no has anotado comidas hoy. Usa el botón de tu Ruta Clínica arriba para registrar en 1 toque.'
-                : `Te quedan cerca de ${remainingKcal} kcal para completar tu día con calma.`}
-            </p>
-            <Link to="/app/diario" style={{ fontWeight: 700, fontSize: '0.9rem' }}>
-              Ver mi diario completo →
-            </Link>
-          </div>
-        </section>
-
-        {/* Macronutrientes */}
-        <section className="ns-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-          <h2 style={{ fontSize: '1.22rem', marginBottom: '12px' }}>Equilibrio de nutrientes</h2>
-          {[
-            { label: 'Proteínas (músculo y saciedad)', current: consumed.protein, goal: goalProtein, color: 'var(--brand-leaf)' },
-            { label: 'Carbohidratos (energía diaria)', current: consumed.carbs, goal: goalCarbs, color: 'var(--accent-carrot)' },
-            { label: 'Grasas buenas (hormonas y corazón)', current: consumed.fat, goal: goalFat, color: 'var(--accent-earth)' },
-            { label: 'Fibra prebiótica (control glucémico y LDL)', current: consumed.fiber, goal: currentUser?.clinicalTargets?.fiberGrams || 28, color: 'var(--brand-leaf)' }
-          ].map(macro => {
-            const pct = Math.min(100, Math.round((macro.current / Math.max(1, macro.goal)) * 100));
-            return (
-              <div key={macro.label} style={{ marginBottom: '12px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem', fontWeight: 600, marginBottom: '4px' }}>
-                  <span>{macro.label}</span>
-                  <span>{macro.current}g / {macro.goal}g</span>
-                </div>
-                <div
-                  role="progressbar"
-                  aria-valuenow={pct}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-label={`${macro.label}: ${macro.current} de ${macro.goal} gramos`}
-                  style={{ height: '9px', borderRadius: '999px', backgroundColor: 'var(--bg-warm)', overflow: 'hidden' }}
-                >
+          {/* 4 barras limpias de macros y fibra */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {[
+              { label: 'Proteína', current: consumed.protein, goal: goalProtein, color: 'var(--brand-leaf)' },
+              { label: 'Carbohidratos', current: consumed.carbs, goal: goalCarbs, color: 'var(--accent-carrot)' },
+              { label: 'Grasas buenas', current: consumed.fat, goal: goalFat, color: 'var(--accent-earth)' },
+              { label: 'Fibra', current: consumed.fiber, goal: currentUser?.clinicalTargets?.fiberGrams || 28, color: 'var(--brand-leaf)' }
+            ].map(macro => {
+              const pct = Math.min(100, Math.round((macro.current / Math.max(1, macro.goal)) * 100));
+              return (
+                <div key={macro.label}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.84rem', fontWeight: 600, marginBottom: '3px' }}>
+                    <span>{macro.label}</span>
+                    <span>{macro.current}g / {macro.goal}g</span>
+                  </div>
                   <div
-                    style={{
-                      width: `${pct}%`,
-                      height: '100%',
-                      backgroundColor: macro.color,
-                      transition: 'width 0.3s ease'
-                    }}
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </section>
-
-        {/* Vasos de agua interactivos */}
-        <section className="ns-card ns-card-sage" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-              <h2 style={{ fontSize: '1.22rem', margin: 0 }}>Agua de hoy</h2>
-              <span style={{ fontWeight: 700, color: 'var(--brand-leaf)', fontSize: '0.92rem' }}>
-                {waterGlassesToday} / {goalWaterGlasses} vasos ({waterGlassesToday * 250} ml)
-              </span>
-            </div>
-            <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', margin: '0 0 14px 0' }}>
-              Toca cada vaso de 250 ml a medida que vayas tomando agua en el día:
-            </p>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '12px' }}>
-              {Array.from({ length: goalWaterGlasses }).map((_, idx) => {
-                const filled = idx < waterGlassesToday;
-                const glassNumber = idx + 1;
-                return (
-                  <button
-                    key={glassNumber}
-                    type="button"
-                    onClick={() =>
-                      setWaterGlassesForDate(
-                        today,
-                        waterGlassesToday === glassNumber ? glassNumber - 1 : glassNumber
-                      )
-                    }
-                    aria-label={`Vaso ${glassNumber} de ${goalWaterGlasses}`}
-                    style={{
-                      padding: '8px 4px',
-                      borderRadius: '12px',
-                      border: '1.5px solid',
-                      borderColor: filled ? 'var(--brand-leaf)' : 'var(--border-strong)',
-                      backgroundColor: filled ? 'var(--brand-leaf)' : 'var(--bg-surface)',
-                      color: filled ? '#FFFFFF' : 'var(--text-secondary)',
-                      fontWeight: 700,
-                      fontSize: '0.8rem',
-                      cursor: 'pointer'
-                    }}
+                    role="progressbar"
+                    aria-valuenow={pct}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label={`${macro.label}: ${macro.current} de ${macro.goal} gramos`}
+                    style={{ height: '7px', borderRadius: '999px', backgroundColor: 'var(--bg-warm)', overflow: 'hidden' }}
                   >
-                    {glassNumber * 250} ml
-                  </button>
-                );
-              })}
+                    <div style={{ width: `${pct}%`, height: '100%', backgroundColor: macro.color, transition: 'width 0.3s ease' }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Control simple y limpio de agua */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '10px 14px',
+              borderRadius: '14px',
+              backgroundColor: 'var(--bg-sage)'
+            }}
+          >
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--brand-leaf)' }}>
+                Agua: {waterGlassesToday} / {goalWaterGlasses} vasos
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                {waterGlassesToday * 250} ml de {ctx.goals.waterMl} ml
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button
+                type="button"
+                onClick={() => setWaterGlassesForDate(today, Math.max(0, waterGlassesToday - 1))}
+                className="ns-btn ns-btn-outline ns-btn-sm"
+                aria-label="Restar 1 vaso de agua"
+              >
+                −
+              </button>
+              <button
+                type="button"
+                onClick={() => setWaterGlassesForDate(today, waterGlassesToday + 1)}
+                className="ns-btn ns-btn-leaf ns-btn-sm"
+              >
+                + 1 vaso
+              </button>
             </div>
           </div>
         </section>
-      </div>
 
-      {/* Segunda fila: Protocolos Médicos Activos para tu Perfil + Plato Calculado para este momento */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-          gap: '22px'
-        }}
-      >
-        {/* Protocolos clínicos activos personalizados */}
-        <article className="ns-card ns-card-warm" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-          <div>
-            <span
-              style={{
-                display: 'inline-block',
-                padding: '4px 12px',
-                borderRadius: '999px',
-                backgroundColor: 'var(--bg-surface)',
-                color: 'var(--accent-earth)',
-                fontWeight: 700,
-                fontSize: '0.78rem',
-                marginBottom: '12px'
-              }}
-            >
-              Base Médica y Clínica de tu Plan ({country.name})
-            </span>
-            <h2 style={{ fontSize: '1.35rem', marginBottom: '12px' }}>
-              Protocolos clínicos activos en tu seguimiento
-            </h2>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {roadmap.protocols.map(proto => (
-                <div key={proto.id} className="ns-card" style={{ padding: '14px' }}>
-                  <div style={{ fontWeight: 700, color: 'var(--brand-leaf)', fontSize: '0.96rem' }}>
-                    {proto.label}
-                  </div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
-                    Fuente: {proto.source}
-                  </div>
-                  <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                    {proto.keyRules}
-                  </p>
-                </div>
-              ))}
-              {roadmap.drugNutrientInteractions?.map(drug => (
-                <div
-                  key={drug.conditionId}
-                  className="ns-card"
-                  style={{ padding: '12px 14px', borderLeft: '3px solid var(--accent-carrot)' }}
-                >
-                  <div style={{ fontWeight: 700, color: 'var(--accent-carrot)', fontSize: '0.84rem' }}>
-                    Farmacovigilancia alimento-medicamento ({drug.medications})
-                  </div>
-                  <p style={{ margin: '4px 0 0 0', fontSize: '0.83rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-                    {drug.interactionRule}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div style={{ marginTop: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-            <Link to="/app/coach" className="ns-btn ns-btn-outline ns-btn-sm">
-              Conversar con mi Coach →
-            </Link>
-            <Link to="/app/aprende" className="ns-btn ns-btn-ghost ns-btn-sm">
-              Leer guías médicas en Aprende
-            </Link>
-          </div>
-        </article>
-
-        {/* Plato calculado por la IA para este momento del día (filtrado sin alergias ni disgustos) */}
+        {/* Tarjeta 2: Siguiente comida recomendada (1 sola decisión clara) */}
         <article className="ns-card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div>
-            <div style={{ position: 'relative', height: '190px' }}>
+            <div style={{ position: 'relative', height: '185px' }}>
               <img
                 src={suggestedDish.image}
                 alt={suggestedDish.dishName}
@@ -503,24 +253,24 @@ export default function HomePage() {
                   left: '12px',
                   backgroundColor: 'var(--bg-surface)',
                   color: 'var(--brand-leaf)',
-                  padding: '4px 12px',
+                  padding: '5px 12px',
                   borderRadius: '999px',
                   fontSize: '0.78rem',
-                  fontWeight: 700
+                  fontWeight: 700,
+                  boxShadow: '0 2px 10px rgba(0,0,0,0.12)'
                 }}
               >
-                Plato IA para tu {suggestedDish.mealType} · {suggestedDish.kcal} kcal
+                Sugerido para tu {suggestedDish.mealType} · {suggestedDish.kcal} kcal
               </span>
             </div>
             <div style={{ padding: '20px' }}>
-              <h2 style={{ fontSize: '1.3rem', marginBottom: '8px' }}>{suggestedDish.dishName}</h2>
-              <p style={{ color: 'var(--text-secondary)', fontSize: '0.92rem', margin: '0 0 14px 0' }}>
-                Seleccionado automáticamente entre los alimentos de {country.name} compatibles con tu dieta ({currentUser?.dietType || 'omnívora'}) y tu {ctx.cookingTimeLabel}.
+              <h2 style={{ fontSize: '1.28rem', marginBottom: '8px' }}>{suggestedDish.dishName}</h2>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', margin: '0 0 14px 0' }}>
+                Elegido según tu perfil en {country.name}, tus gustos y el protocolo {roadmap.protocols[0]?.source}.
               </p>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <span className="ns-chip">{suggestedDish.protein}g proteína</span>
                 <span className="ns-chip">{suggestedDish.carbs}g carbos</span>
-                <span className="ns-chip">{suggestedDish.fat}g grasas</span>
                 <span className="ns-chip">{suggestedDish.fiber}g fibra</span>
               </div>
             </div>
@@ -529,22 +279,77 @@ export default function HomePage() {
           <div style={{ padding: '0 20px 20px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
             <button
               type="button"
-              onClick={() =>
-                addMealEntry({
-                  date: today,
-                  ...suggestedDish
-                })
-              }
+              onClick={() => addMealEntry({ date: today, ...suggestedDish })}
               className="ns-btn ns-btn-leaf ns-btn-sm"
+              style={{ flex: 1 }}
             >
-              + Agregar a mi {suggestedDish.mealType.toLowerCase()} de hoy
+              + Registrar en mi diario
             </button>
-            <Link to="/app/planes" className="ns-btn ns-btn-ghost ns-btn-sm">
+            <Link to="/app/planes" className="ns-btn ns-btn-outline ns-btn-sm">
               Ver plan semanal
             </Link>
           </div>
         </article>
       </div>
+
+      {/* Detalles clínicos profundos guardados de forma limpia y desplegable (sin contaminación visual) */}
+      <details className="ns-card ns-card-warm" style={{ padding: '16px 20px' }}>
+        <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: '0.96rem', color: 'var(--brand-leaf)' }}>
+          Ver mis protocolos médicos activos, farmacovigilancia y guía del día
+        </summary>
+
+        <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {roadmap.protocols.map(proto => (
+            <div key={proto.id} className="ns-card" style={{ padding: '14px' }}>
+              <div style={{ fontWeight: 700, color: 'var(--brand-leaf)', fontSize: '0.94rem' }}>
+                {proto.label}
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                {proto.source}
+              </div>
+              <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                {proto.keyRules}
+              </p>
+            </div>
+          ))}
+
+          {roadmap.drugNutrientInteractions?.map(drug => (
+            <div
+              key={drug.conditionId}
+              className="ns-card"
+              style={{ padding: '12px 14px', borderLeft: '3px solid var(--accent-carrot)' }}
+            >
+              <div style={{ fontWeight: 700, color: 'var(--accent-carrot)', fontSize: '0.84rem' }}>
+                Farmacovigilancia ({drug.medications})
+              </div>
+              <p style={{ margin: '4px 0 0 0', fontSize: '0.83rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                {drug.interactionRule}
+              </p>
+            </div>
+          ))}
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '8px' }}>
+            {roadmap.dayTimeline.map(step => (
+              <div
+                key={step.period}
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: '12px',
+                  backgroundColor: step.done ? 'var(--bg-sage)' : 'var(--bg-surface)',
+                  border: '1px solid var(--border-warm)',
+                  fontSize: '0.82rem'
+                }}
+              >
+                <div style={{ fontWeight: 700, color: step.done ? 'var(--brand-leaf)' : 'var(--text-primary)' }}>
+                  {step.done ? '✓ ' : '• '}
+                  {step.period}
+                </div>
+                <div style={{ color: 'var(--text-secondary)' }}>{step.instruction}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </details>
     </div>
   );
 }

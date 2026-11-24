@@ -94,42 +94,71 @@ export const MEDICAL_CONDITIONS = [
 
 /**
  * Base de Farmacovigilancia Alimento-Medicamento (Interacciones Clínicas Relevantes)
- * Permite a la IA advertir proactivamente cómo coordinar horarios de comidas con tratamientos comunes.
+ * Cada interacción se activa únicamente si la persona declaró ese medicamento real
+ * (nombre genérico o comercial), NUNCA de forma ciega solo por tener una condición general.
  */
 export const CLINICAL_DRUG_NUTRIENT_INTERACTIONS = [
   {
+    id: 'drug-metformina',
     conditionId: 'resistencia_insulina_diabetes',
-    medications: 'Metformina, Insulina o Sulfonilureas (Glibenclamida, Glimepirida)',
+    medicationKeywords: ['metformina', 'glucophage', 'glafornil'],
+    medications: 'Metformina',
     interactionRule:
-      'Con metformina: tómala junto con las comidas para reducir molestias gastrointestinales y vigila niveles de Vitamina B12 (huevo, pescado, carnes magras). Si usas insulina o sulfonilureas: no omitas comidas ni elimines de golpe todos los carbohidratos complejos para prevenir hipoglucemia (<70 mg/dL).',
+      'Tómala junto con las comidas para reducir molestias gastrointestinales y vigila tu aporte y niveles de Vitamina B12 (huevo, pescado, carnes magras o suplementación según médico).',
     source: 'Farmacovigilancia Clínica ADA / FDA'
   },
   {
-    conditionId: 'hipertension_cardiovascular',
-    medications: 'IECA (Enalapril), ARA-II (Losartán, Valsartán) o Espironolactona',
+    id: 'drug-insulina-sulfonilureas',
+    conditionId: 'resistencia_insulina_diabetes',
+    medicationKeywords: ['insulina', 'glibenclamida', 'glimepirida', 'gliclazida', 'glipizida', 'amaryl', 'lantus', 'humalog', 'novorapid'],
+    medications: 'Insulina o Sulfonilureas',
     interactionRule:
-      'Evita las "sales dietéticas" de supermercado a base de cloruro de potasio sin consultar a tu médico, ya que estos fármacos retienen potasio. Sazona con hierbas aromáticas, ajo, cebolla y limón natural.',
+      'No omitas comidas principales ni recortes de golpe todos los carbohidratos complejos sin ajustar tu pauta con tu médico, para prevenir episodios de hipoglucemia (<70 mg/dL).',
+    source: 'Guía Clínica ADA de Seguridad Glucémica'
+  },
+  {
+    id: 'drug-ieca-ara2',
+    conditionId: 'hipertension_cardiovascular',
+    medicationKeywords: ['losartan', 'enalapril', 'valsartan', 'captopril', 'lisinopril', 'telmisartan', 'irbesartan', 'espironolactona'],
+    medications: 'IECA / ARA-II / Ahorradores de potasio (Losartán, Enalapril, Espironolactona)',
+    interactionRule:
+      'Evita las "sales dietéticas" a base de cloruro de potasio y suplementos de potasio sin aval médico (riesgo de hiperpotasemia). Sazona con hierbas aromáticas, ajo y limón.',
     source: 'Guía Farmacológica AHA / ACC'
   },
   {
+    id: 'drug-estatinas',
     conditionId: 'colesterol_trigliceridos',
-    medications: 'Estatinas (Atorvastatina, Simvastatina, Rosuvastatina) o Anticoagulantes (Warfarina)',
+    medicationKeywords: ['atorvastatina', 'simvastatina', 'rosuvastatina', 'lovastatina', 'estatina', 'lipitor', 'crestor'],
+    medications: 'Estatinas (Atorvastatina, Simvastatina, Rosuvastatina)',
     interactionRule:
-      'Con atorvastatina/simvastatina: evita el jugo de toronja (pomelo) porque inhibe la enzima CYP3A4. Si tomas warfarina: mantén una porción diaria constante de vegetales verdes (espinaca, brócoli) sin hacer cambios drásticos de un día para otro en tu ingesta de Vitamina K.',
-    source: 'Consenso Clínico AHA / ESC de Lípidos y Anticoagulación'
+      'Evita el jugo de toronja (pomelo) con atorvastatina o simvastatina porque inhibe su metabolismo hepático (CYP3A4). Potencia el efecto lipídico con avena, legumbres y aceite de oliva.',
+    source: 'Consenso Clínico AHA / ESC de Lípidos'
   },
   {
+    id: 'drug-warfarina',
+    conditionId: 'anticoagulacion',
+    medicationKeywords: ['warfarina', 'coumadin', 'acenocumarol', 'sintrom'],
+    medications: 'Anticoagulantes cumarínicos (Warfarina / Acenocumarol)',
+    interactionRule:
+      'No elimines las hojas verdes (espinaca, brócoli, acelga), pero mantén una cantidad diaria CONSTANTE de alimentos ricos en Vitamina K sin cambios bruscos de un día para otro para no alterar tu INR.',
+    source: 'Consenso Clínico ESC / ACCP de Anticoagulación'
+  },
+  {
+    id: 'drug-levotiroxina',
     conditionId: 'hipotiroidismo_metabolico',
+    medicationKeywords: ['levotiroxina', 'eutirox', 'synthroid', 'tiroxina'],
     medications: 'Levotiroxina sódica',
     interactionRule:
-      'Tómala con agua pura 45 a 60 minutos antes del desayuno. El café expreso, el salvado de fibra, la soya y los suplementos de calcio o hierro reducen su absorción intestinal hasta en un 40% si se toman al mismo tiempo.',
+      'Tómala en ayunas con agua pura 45 a 60 minutos antes del desayuno. El café, la soya, el salvado de fibra y los suplementos de calcio o hierro reducen su absorción intestinal hasta en un 40%.',
     source: 'American Thyroid Association (ATA)'
   },
   {
+    id: 'drug-hierro-oral',
     conditionId: 'anemia_fatiga',
-    medications: 'Sulfato ferroso / Hierro oral',
+    medicationKeywords: ['sulfato ferroso', 'fumarato ferroso', 'hierro oral', 'suplemento de hierro', 'ferroso'],
+    medications: 'Hierro oral (Sulfato o fumarato ferroso)',
     interactionRule:
-      'Acompáñalo con vitamina C natural (guayaba, naranja, limonada sin azúcar) y sepáralo 2 horas de lácteos, café o té negro/verde, cuyos fitatos, taninos y calcio bloquean el transportador intestinal DMT1.',
+      'Acompáñalo con vitamina C natural (guayaba, naranja, limonada sin azúcar) y sepáralo 2 horas de lácteos, café o té negro/verde, cuyos taninos y calcio bloquean su absorción.',
     source: 'Guía OMS de Suplementación y Absorción de Hierro'
   }
 ];

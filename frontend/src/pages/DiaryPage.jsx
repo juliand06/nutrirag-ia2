@@ -8,6 +8,7 @@ import {
 } from '../lib/proactiveAiEngine';
 import { getLocalTodayIso } from '../lib/nutritionCalculator';
 import { HandBowlIllustration } from '../assets/doodles/HandDrawnSvgs';
+import MealPhotoAnalyzer from '../components/MealPhotoAnalyzer';
 
 const MEAL_SECTIONS = [
   { id: 'Desayuno', title: 'Desayuno', timeHint: '7:00 – 9:30 am', photo: '/img/plato-desayuno.webp' },
@@ -43,6 +44,8 @@ export default function DiaryPage() {
   const todayIso = getLocalTodayIso();
   const [selectedDate, setSelectedDate] = useState(todayIso);
   const [addingToMeal, setAddingToMeal] = useState(null);
+  const [showPhotoScanner, setShowPhotoScanner] = useState(false);
+  const [photoMealType, setPhotoMealType] = useState('Desayuno');
 
   const currentUser = useNutriStore(s => s.currentUser);
   const workspace = useNutriStore(s => s.workspace);
@@ -118,14 +121,47 @@ export default function DiaryPage() {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={handleCopyPreviousDay}
-          className="ns-btn ns-btn-outline ns-btn-sm"
-        >
-          Copiar el día anterior
-        </button>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => setShowPhotoScanner(v => !v)}
+            className="ns-btn ns-btn-carrot ns-btn-sm"
+          >
+            {showPhotoScanner ? 'Cerrar escáner de foto' : '📷 Analizar foto de mi plato (IA)'}
+          </button>
+          <button
+            type="button"
+            onClick={handleCopyPreviousDay}
+            className="ns-btn ns-btn-outline ns-btn-sm"
+          >
+            Copiar el día anterior
+          </button>
+        </div>
       </div>
+
+      {/* Escáner real de fotografías de comida con Visión IA */}
+      {showPhotoScanner && (
+        <section className="ns-card ns-card-organic" style={{ marginBottom: '22px', padding: '22px' }}>
+          <h2 style={{ fontSize: '1.3rem', marginBottom: '6px' }}>
+            Escáner de Fotos de Comida con Visión IA Clínica
+          </h2>
+          <p style={{ margin: '0 0 14px 0', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+            Toma una foto o sube una imagen de tu desayuno, almuerzo o cena. La IA estimará ingredientes, gramos, calorías, carga glucémica y micronutrientes, y podrás ajustar los gramos antes de guardar.
+          </p>
+          <MealPhotoAnalyzer
+            mealType={photoMealType}
+            onMealTypeChange={setPhotoMealType}
+            userProfile={currentUser || {}}
+            onSaveMeal={(mealPayload) => {
+              addMealEntry({
+                date: selectedDate,
+                ...mealPayload
+              });
+              setShowPhotoScanner(false);
+            }}
+          />
+        </section>
+      )}
 
       {/* Calendario semanal interactivo */}
       <div
@@ -209,24 +245,34 @@ export default function DiaryPage() {
           </div>
         </div>
 
-        {/* Fila de Biomarcadores Clínicos del Día (Carga Glucémica, Sodio/Potasio, Hierro+VitC, Omega-3) */}
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', paddingTop: '4px' }}>
-          <span className="ns-chip" style={{ fontSize: '0.78rem' }}>
-            Carga Glucémica (ADA): {dayTotals.glycemicLoad} ({clinicalMetrics.glycemicLoadLevel})
-          </span>
-          <span className="ns-chip" style={{ fontSize: '0.78rem' }}>
-            Sodio / Potasio (DASH): {dayTotals.sodiumMg}mg Na / {dayTotals.potassiumMg}mg K (Razón {clinicalMetrics.naKRatio})
-          </span>
-          <span className="ns-chip" style={{ fontSize: '0.78rem' }}>
-            Hierro + Vit. C (OMS): {dayTotals.ironMg}mg Fe + {dayTotals.vitaminCMg}mg Vit.C
-          </span>
-          <span className="ns-chip" style={{ fontSize: '0.78rem' }}>
-            Omega-3 (AHA): {dayTotals.omega3Mg}mg
-          </span>
-          <span className="ns-chip" style={{ fontSize: '0.78rem' }}>
-            Pulsos proteicos ≥24g (ISSN): {clinicalMetrics.anabolicMealsCount} tomas
-          </span>
-        </div>
+        {/* Biomarcadores clínicos detallados en acordeón limpio (cero ruido visual) */}
+        <details style={{ paddingTop: '4px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '0.84rem', fontWeight: 700, color: 'var(--brand-leaf)' }}>
+            Ver biomarcadores clínicos de hoy (Carga Glucémica, Sodio/Potasio, Hierro, Omega-3)
+          </summary>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
+            <span className="ns-chip" style={{ fontSize: '0.78rem' }}>
+              Carga Glucémica (ADA): {dayTotals.glycemicLoad} ({clinicalMetrics.glycemicLoadLevel})
+            </span>
+            <span className="ns-chip" style={{ fontSize: '0.78rem' }}>
+              Sodio / Potasio (DASH):{' '}
+              {dayTotals.sodiumMg !== null ? `${dayTotals.sodiumMg}mg Na` : 'Sin datos verificados de Na'} /{' '}
+              {dayTotals.potassiumMg !== null ? `${dayTotals.potassiumMg}mg K` : 'Sin datos de K'}
+              {clinicalMetrics.naKRatio !== null ? ` (Razón ${clinicalMetrics.naKRatio})` : ''} · Cobertura {clinicalMetrics.coverage?.sodiumPct || 0}%
+            </span>
+            <span className="ns-chip" style={{ fontSize: '0.78rem' }}>
+              Hierro + Vit. C (OMS):{' '}
+              {dayTotals.ironMg !== null ? `${dayTotals.ironMg}mg Fe` : 'Sin datos de Fe'} +{' '}
+              {dayTotals.vitaminCMg !== null ? `${dayTotals.vitaminCMg}mg Vit.C` : 'Sin datos de Vit.C'}
+            </span>
+            <span className="ns-chip" style={{ fontSize: '0.78rem' }}>
+              Omega-3 (AHA): {dayTotals.omega3Mg !== null ? `${dayTotals.omega3Mg}mg` : 'Sin datos verificados'}
+            </span>
+            <span className="ns-chip" style={{ fontSize: '0.78rem' }}>
+              Pulsos proteicos ≥24g (ISSN): {clinicalMetrics.anabolicMealsCount} tomas
+            </span>
+          </div>
+        </details>
 
         <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
           {dayLogs.length === 0
