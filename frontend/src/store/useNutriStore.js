@@ -84,6 +84,8 @@ function loadWorkspaceForUser(user) {
     recentFoodIds: ['fd-huevo', 'fd-avena', 'fd-aguacate', 'fd-pollo'],
     weeklyPlan: initialPlan,
     checkedGroceryIds: [],
+    wellnessCheckIns: [],
+    aiMemoryFacts: [],
     chatMessages: [
       {
         id: 'msg-welcome',
@@ -92,7 +94,21 @@ function loadWorkspaceForUser(user) {
         citations: []
       }
     ],
-    notificationsEnabled: true
+    notificationsEnabled: true,
+    notificationSettings: {
+      enabled: false,
+      webPushGranted: false,
+      mealReminders: true,
+      waterReminders: true,
+      inactivityAlerts: true,
+      schedules: {
+        desayuno: '08:00',
+        almuerzo: '13:00',
+        merienda: '16:30',
+        cena: '20:00'
+      },
+      waterIntervalHours: 2.5
+    }
   };
   localStorage.setItem(key, JSON.stringify(initialWs));
   return initialWs;
@@ -215,9 +231,38 @@ export const useNutriStore = create((set, get) => {
       set({ currentUser: null, workspace: null });
     },
 
+    updateVoluntaryClinicalHistory: (clinicalHistory) =>
+      set(state => {
+        if (!state.currentUser) return {};
+        const nextUser = {
+          ...state.currentUser,
+          voluntaryClinicalHistory: clinicalHistory
+        };
+        saveStoredSessionProfile(nextUser);
+        return { currentUser: nextUser };
+      }),
+
+    clearVoluntaryClinicalHistory: () =>
+      set(state => {
+        if (!state.currentUser) return {};
+        const nextUser = {
+          ...state.currentUser,
+          voluntaryClinicalHistory: null
+        };
+        saveStoredSessionProfile(nextUser);
+        return { currentUser: nextUser };
+      }),
+
     addMealEntry: (mealEntry) =>
       set(state => {
         if (!state.currentUser || !state.workspace) return {};
+        const optInt = (v) =>
+          v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v)) ? Math.round(Number(v)) : null;
+        const optDec = (v, dec = 1) =>
+          v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v))
+            ? Number(Number(v).toFixed(dec))
+            : null;
+
         const entry = {
           id: `meal-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           date: mealEntry.date || getTodayIso(),
@@ -229,13 +274,13 @@ export const useNutriStore = create((set, get) => {
           protein: Math.round(Number(mealEntry.protein) || 0),
           fat: Math.round(Number(mealEntry.fat) || 0),
           fiber: Math.round(Number(mealEntry.fiber) || 0),
-          sodiumMg: Math.round(Number(mealEntry.sodiumMg) || 0),
-          potassiumMg: Math.round(Number(mealEntry.potassiumMg) || 0),
-          ironMg: Number((Number(mealEntry.ironMg) || 0).toFixed(1)),
-          calciumMg: Math.round(Number(mealEntry.calciumMg) || 0),
-          vitaminCMg: Math.round(Number(mealEntry.vitaminCMg) || 0),
-          omega3Mg: Math.round(Number(mealEntry.omega3Mg) || 0),
-          glycemicLoad: Number((Number(mealEntry.glycemicLoad) || 0).toFixed(1)),
+          sodiumMg: optInt(mealEntry.sodiumMg),
+          potassiumMg: optInt(mealEntry.potassiumMg),
+          ironMg: optDec(mealEntry.ironMg, 1),
+          calciumMg: optInt(mealEntry.calciumMg),
+          vitaminCMg: optInt(mealEntry.vitaminCMg),
+          omega3Mg: optInt(mealEntry.omega3Mg),
+          glycemicLoad: optDec(mealEntry.glycemicLoad, 1),
           image: mealEntry.image || '/img/plato-almuerzo.webp',
           foodId: mealEntry.foodId || null
         };
@@ -262,6 +307,12 @@ export const useNutriStore = create((set, get) => {
           if (item.id !== mealId) return item;
           const oldG = Math.max(1, Number(item.grams) || 100);
           const ratio = g / oldG;
+          const scaleOpt = (val, decimals = 0) => {
+            if (val === null || val === undefined || !Number.isFinite(Number(val))) return null;
+            return decimals > 0
+              ? Number((Number(val) * ratio).toFixed(decimals))
+              : Math.round(Number(val) * ratio);
+          };
           return {
             ...item,
             grams: g,
@@ -270,13 +321,13 @@ export const useNutriStore = create((set, get) => {
             protein: Math.round((item.protein || 0) * ratio),
             fat: Math.round((item.fat || 0) * ratio),
             fiber: Math.round((item.fiber || 0) * ratio),
-            sodiumMg: Math.round((item.sodiumMg || 0) * ratio),
-            potassiumMg: Math.round((item.potassiumMg || 0) * ratio),
-            ironMg: Number(((item.ironMg || 0) * ratio).toFixed(1)),
-            calciumMg: Math.round((item.calciumMg || 0) * ratio),
-            vitaminCMg: Math.round((item.vitaminCMg || 0) * ratio),
-            omega3Mg: Math.round((item.omega3Mg || 0) * ratio),
-            glycemicLoad: Number(((item.glycemicLoad || 0) * ratio).toFixed(1))
+            sodiumMg: scaleOpt(item.sodiumMg),
+            potassiumMg: scaleOpt(item.potassiumMg),
+            ironMg: scaleOpt(item.ironMg, 1),
+            calciumMg: scaleOpt(item.calciumMg),
+            vitaminCMg: scaleOpt(item.vitaminCMg),
+            omega3Mg: scaleOpt(item.omega3Mg),
+            glycemicLoad: scaleOpt(item.glycemicLoad, 1)
           };
         });
         const nextWs = { ...state.workspace, mealLogs: nextLogs };
@@ -378,6 +429,51 @@ export const useNutriStore = create((set, get) => {
         return { workspace: nextWs };
       }),
 
+    addWellnessCheckIn: ({ energy = 3, hunger = 3, digestion = 'normal', sleepHours = 7, note = '' }) =>
+      set(state => {
+        if (!state.currentUser || !state.workspace) return {};
+        const checkIn = {
+          id: `chk-${Date.now()}`,
+          date: getTodayIso(),
+          energy: Math.max(1, Math.min(5, Number(energy) || 3)),
+          hunger: Math.max(1, Math.min(5, Number(hunger) || 3)),
+          digestion: digestion || 'normal',
+          sleepHours: Math.max(2, Math.min(14, Number(sleepHours) || 7)),
+          note: String(note || '').trim().slice(0, 160)
+        };
+        const nextCheckIns = [...(state.workspace.wellnessCheckIns || []), checkIn].slice(-30);
+        const nextWs = { ...state.workspace, wellnessCheckIns: nextCheckIns };
+        persistWorkspace(state.currentUser.id, nextWs);
+        return {
+          workspace: nextWs,
+          toast: { message: 'Chequeo de 10 s guardado. Tu Coach IA ya ajustó tu contexto.', tone: 'emerald' }
+        };
+      }),
+
+    addAiMemoryFact: (factText) =>
+      set(state => {
+        if (!state.currentUser || !state.workspace) return {};
+        const clean = String(factText || '').trim().slice(0, 160);
+        if (clean.length < 3) return {};
+        const fact = { id: `fact-${Date.now()}`, text: clean, createdAt: getTodayIso() };
+        const nextFacts = [...(state.workspace.aiMemoryFacts || []), fact].slice(-12);
+        const nextWs = { ...state.workspace, aiMemoryFacts: nextFacts };
+        persistWorkspace(state.currentUser.id, nextWs);
+        return {
+          workspace: nextWs,
+          toast: { message: 'Nota guardada en la memoria editable de tu Coach.', tone: 'emerald' }
+        };
+      }),
+
+    removeAiMemoryFact: (factId) =>
+      set(state => {
+        if (!state.currentUser || !state.workspace) return {};
+        const nextFacts = (state.workspace.aiMemoryFacts || []).filter(f => f.id !== factId);
+        const nextWs = { ...state.workspace, aiMemoryFacts: nextFacts };
+        persistWorkspace(state.currentUser.id, nextWs);
+        return { workspace: nextWs };
+      }),
+
     addWeightLog: (weightKg, note = '') =>
       set(state => {
         if (!state.currentUser || !state.workspace) return {};
@@ -440,6 +536,42 @@ export const useNutriStore = create((set, get) => {
           localStorage.setItem('nutristudio_units', next);
         }
         return { unitSystem: next };
+      }),
+
+    updateNotificationSettings: (patch) =>
+      set(state => {
+        if (!state.currentUser?.id || !state.workspace) return {};
+        const prevSettings = state.workspace.notificationSettings || {
+          enabled: false,
+          webPushGranted: false,
+          mealReminders: true,
+          waterReminders: true,
+          inactivityAlerts: true,
+          schedules: {
+            desayuno: '08:00',
+            almuerzo: '13:00',
+            merienda: '16:30',
+            cena: '20:00'
+          },
+          waterIntervalHours: 2.5
+        };
+        const nextSettings = {
+          ...prevSettings,
+          ...patch,
+          schedules: {
+            ...prevSettings.schedules,
+            ...(patch.schedules || {})
+          }
+        };
+        const nextWs = {
+          ...state.workspace,
+          notificationSettings: nextSettings
+        };
+        persistWorkspace(state.currentUser.id, nextWs);
+        return {
+          workspace: nextWs,
+          toast: { message: 'Configuración de recordatorios actualizada.', tone: 'emerald' }
+        };
       }),
 
     setCopilotOpen: (val) =>

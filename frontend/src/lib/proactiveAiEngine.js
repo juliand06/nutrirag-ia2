@@ -28,9 +28,48 @@ export const ALLERGEN_SYNONYM_MATRIX = {
   soya: ['soya', 'soja', 'tofu', 'edamame', 'tempeh', 'lecitina de soya', 'soy', 'soybeans']
 };
 
+function hasWord(cleanText, pattern) {
+  return new RegExp(`(^|[^a-z0-9])(${pattern})([^a-z0-9]|$)`).test(cleanText);
+}
+
+/**
+ * Normaliza valores de laboratorio a mg/dL (si el usuario los ingresó en mmol/L)
+ * y evalúa vigencia (>180 días = vencido).
+ */
+export function normalizeVoluntaryLabValues(vh = null) {
+  if (!vh || !vh.consentGranted) return null;
+  const unit = vh.labUnit === 'mmol' ? 'mmol' : 'mgdl';
+  const toMgDl = (val, factor) => {
+    const n = Number(val);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return unit === 'mmol' ? Math.round(n * factor) : n;
+  };
+
+  let isStale = false;
+  if (vh.examDate) {
+    const parsed = new Date(`${vh.examDate}T12:00:00`);
+    if (!Number.isNaN(parsed.getTime())) {
+      const diffDays = (Date.now() - parsed.getTime()) / (1000 * 60 * 60 * 24);
+      isStale = diffDays > 180;
+    }
+  }
+
+  return {
+    ...vh,
+    labUnit: unit,
+    fastingGlucoseMgDl: toMgDl(vh.fastingGlucose, 18.018),
+    hba1cPct: Number(vh.hba1c) > 0 ? Number(vh.hba1c) : null,
+    ldlMgDl: toMgDl(vh.ldlCholesterol, 38.67),
+    triglyceridesMgDl: toMgDl(vh.triglycerides, 88.57),
+    hemoglobinGDl: Number(vh.hemoglobin) > 0 ? Number(vh.hemoglobin) : null,
+    isStale
+  };
+}
+
 /**
  * Mapea tanto los IDs del onboarding ('diabetes', 'hipertension', 'colesterol', 'tiroides', 'sop', 'renal')
- * como los IDs clínicos extendidos a los protocolos médicos oficiales, aplicando jerarquía de precedencia clínica.
+ * como los IDs clínicos extendidos a los protocolos médicos oficiales, aplicando jerarquía de precedencia clínica
+ * y límites de palabra estrictos (evita que "depresión" active presión o "adrenal" active renal).
  */
 export function resolveUserClinicalProtocols(userProfile = {}) {
   const raw = [
@@ -44,49 +83,77 @@ export function resolveUserClinicalProtocols(userProfile = {}) {
 
   raw.forEach(id => {
     const clean = norm(id);
-    if (clean.includes('diabet') || clean.includes('insulina') || clean.includes('glucosa')) {
+    if (hasWord(clean, 'diabetes|prediabetes|resistencia_insulina_diabetes|insulina|glucosa|hiperglucemia')) {
       mappedIds.add('resistencia_insulina_diabetes');
     }
-    if (clean.includes('hiperten') || clean.includes('presion') || clean.includes('cardio')) {
+    if (hasWord(clean, 'hipertension|hipertension_cardiovascular|presion\\s+alta|presion\\s+arterial|cardiovascular')) {
       mappedIds.add('hipertension_cardiovascular');
     }
-    if (clean.includes('colesterol') || clean.includes('triglicer') || clean.includes('lipid')) {
+    if (hasWord(clean, 'colesterol|trigliceridos|colesterol_trigliceridos|dislipidemia|hiperlipidemia')) {
       mappedIds.add('colesterol_trigliceridos');
     }
-    if (clean.includes('gastritis') || clean.includes('colon') || clean.includes('digest')) {
+    if (hasWord(clean, 'gastritis|gastritis_digestion|colon\\s+irritable|sii|reflujo')) {
       mappedIds.add('gastritis_digestion');
     }
-    if (clean.includes('anemia') || clean.includes('fatiga') || clean.includes('hierro')) {
+    if (hasWord(clean, 'anemia|anemia_fatiga|ferropenia|ferropenica') && !hasWord(clean, 'hemocromatosis')) {
       mappedIds.add('anemia_fatiga');
     }
-    if (clean.includes('higado')) {
+    if (hasWord(clean, 'higado|higado_graso_metabolico|esteatosis|masld')) {
       mappedIds.add('higado_graso_metabolico');
     }
-    if (clean.includes('renal') || clean.includes('rinon')) {
+    if (hasWord(clean, 'renal|salud_renal_kdigo|rinon|erc|nefropatia') && !hasWord(clean, 'adrenal|suprarrenal')) {
       mappedIds.add('salud_renal_kdigo');
     }
-    if (clean.includes('tiroid') || clean.includes('hipotiroid')) {
+    if (hasWord(clean, 'tiroides|hipotiroidismo|hipotiroidismo_metabolico')) {
       mappedIds.add('hipotiroidismo_metabolico');
     }
-    if (clean.includes('sop') || clean.includes('ovario') || clean.includes('poliquist')) {
+    if (hasWord(clean, 'sop|sop_endocrino|ovario\\s+poliquistico')) {
       mappedIds.add('sop_endocrino');
     }
-    if (clean.includes('celiac') || clean.includes('gluten')) {
+    if (hasWord(clean, 'celiaca|celiaquia|enfermedad_celiaca_gluten|gluten')) {
       mappedIds.add('enfermedad_celiaca_gluten');
     }
   });
 
-  if (dietType === 'sin_gluten' || allergies.some(a => a.includes('gluten') || a.includes('trigo'))) {
+  if (dietType === 'sin_gluten' || allergies.some(a => hasWord(a, 'gluten|trigo|celiac\\w*'))) {
     mappedIds.add('enfermedad_celiaca_gluten');
+  }
+
+  // Cruce automático con el Historial Clínico Voluntario (respetando unidades mg/dL vs mmol/L y vigencia)
+  const labs = normalizeVoluntaryLabValues(userProfile?.voluntaryClinicalHistory);
+  if (labs && !labs.isStale) {
+    if ((labs.fastingGlucoseMgDl && labs.fastingGlucoseMgDl >= 100) || (labs.hba1cPct && labs.hba1cPct >= 5.7)) {
+      mappedIds.add('resistencia_insulina_diabetes');
+    }
+    if ((labs.ldlMgDl && labs.ldlMgDl >= 130) || (labs.triglyceridesMgDl && labs.triglyceridesMgDl >= 150)) {
+      mappedIds.add('colesterol_trigliceridos');
+    }
+    if (labs.hemoglobinGDl && labs.hemoglobinGDl < 12.0) {
+      mappedIds.add('anemia_fatiga');
+    }
+    const bpMatch = String(labs.bloodPressure || '').match(/(\d{2,3})\s*\/\s*(\d{2,3})/);
+    if (bpMatch && (Number(bpMatch[1]) >= 130 || Number(bpMatch[2]) >= 85)) {
+      mappedIds.add('hipertension_cardiovascular');
+    }
+    const medsNorm = norm(`${labs.medications || ''} ${labs.clinicalNotes || ''}`);
+    if (hasWord(medsNorm, 'levotiroxina|eutirox|synthroid|hipotiroidismo')) {
+      mappedIds.add('hipotiroidismo_metabolico');
+    }
+    if (hasWord(medsNorm, 'metformina|insulina|glibenclamida|glimepirida')) {
+      mappedIds.add('resistencia_insulina_diabetes');
+    }
+    if (hasWord(medsNorm, 'losartan|enalapril|valsartan|captopril|espironolactona')) {
+      mappedIds.add('hipertension_cardiovascular');
+    }
+    if (hasWord(medsNorm, 'atorvastatina|rosuvastatina|simvastatina|lovastatina')) {
+      mappedIds.add('colesterol_trigliceridos');
+    }
   }
 
   // Jerarquía de precedencia clínica: Si hay enfermedad renal (KDIGO), NO se activa hipertrofia hiperproteica (ISSN)
   const hasRenalPrecedence = mappedIds.has('salud_renal_kdigo');
   if (goal === 'masa_muscular' && !hasRenalPrecedence) {
     mappedIds.add('rendimiento_deportivo');
-  }
-  if (goal === 'control_condicion' && mappedIds.size === 0) {
-    mappedIds.add('resistencia_insulina_diabetes');
   }
 
   let protocols = MEDICAL_CONDITIONS.filter(c => mappedIds.has(c.id));
@@ -107,15 +174,15 @@ export function resolveUserClinicalProtocols(userProfile = {}) {
   ];
   protocols = protocols.sort((a, b) => priorityOrder.indexOf(a.id) - priorityOrder.indexOf(b.id));
 
-  // Si no tiene condición médica específica, activamos el protocolo preventivo OMS/ESPEN de base
+  // Si no tiene condición médica específica, activamos el protocolo preventivo OMS/FAO honesto
   if (protocols.length === 0) {
     return [
       {
         id: 'oms_prevencion_integral',
-        label: 'Prevención Metabólica y Crononutrición (OMS / FAO / ESPEN)',
-        source: 'Guías Globales OMS/FAO & Consenso ESPEN de Crononutrición',
+        label: 'Alimentación Saludable y Preventiva (OMS / FAO)',
+        source: 'Guías Globales OMS/FAO de Alimentación Saludable',
         keyRules:
-          'Prioriza alimentos naturales (NOVA 1), 25–35 g de fibra diaria, 1.6 g/kg de proteína repartida en 3–4 comidas y cenas ligeras 2–3 horas antes de dormir.',
+          'Prioriza alimentos naturales (NOVA 1), 25–35 g de fibra diaria, proteína repartida en tus comidas principales (0.8–1.2 g/kg base; mayor si entrenas fuerza o eres adulto mayor) y cenas ligeras 2–3 horas antes de dormir.',
         alertRule: 'Moderar azúcares añadidos, harinas refinadas y ultraprocesados altos en sodio.'
       }
     ];
@@ -125,11 +192,26 @@ export function resolveUserClinicalProtocols(userProfile = {}) {
 }
 
 /**
- * Obtiene las alertas de farmacovigilancia alimento-medicamento relevantes para los protocolos activos de la persona.
+ * Obtiene las alertas de farmacovigilancia alimento-medicamento ACTIVADAS POR MEDICAMENTO REAL DECLARADO.
+ * Nunca muestra advertencias de warfarina, levotiroxina o estatinas a quien no declaró esos fármacos.
  */
-export function resolveDrugNutrientInteractions(protocols = []) {
-  const activeIds = new Set((protocols || []).map(p => p.id));
-  return CLINICAL_DRUG_NUTRIENT_INTERACTIONS.filter(item => activeIds.has(item.conditionId));
+export function resolveDrugNutrientInteractions(_protocols = [], userProfile = null) {
+  const vh = userProfile?.voluntaryClinicalHistory;
+  const declaredText = norm(
+    [
+      vh?.consentGranted ? vh.medications : '',
+      vh?.consentGranted ? vh.clinicalNotes : '',
+      userProfile?.medications || ''
+    ]
+      .filter(Boolean)
+      .join(' ')
+  );
+
+  if (!declaredText.trim()) return [];
+
+  return CLINICAL_DRUG_NUTRIENT_INTERACTIONS.filter(item =>
+    (item.medicationKeywords || []).some(kw => hasWord(declaredText, kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  );
 }
 
 /**
@@ -358,8 +440,9 @@ export function getSafeFoodsForUser(userProfile = {}) {
 }
 
 /**
- * Analiza médicamente todos los registros de comida de un día (Carga Glucémica,
- * Razón Sodio/Potasio, Sinergia Hierro + Vitamina C, Omega-3, Fibra y Crononutrición).
+ * Analiza médicamente todos los registros de comida de un día SIN INVENTAR MICRONUTRIENTES.
+ * Si un registro carece de sodio, potasio, hierro o calcio, se contabiliza como null y se reporta
+ * el porcentaje real de cobertura (`coverage`), emitiendo alertas solo con datos verificados.
  */
 export function analyzeDayClinicalMetrics({ dayLogs = [], userProfile = {} }) {
   const protocols = resolveUserClinicalProtocols(userProfile);
@@ -389,7 +472,24 @@ export function analyzeDayClinicalMetrics({ dayLogs = [], userProfile = {} }) {
   let anabolicMealsCount = 0;
   let dinnerKcal = 0;
 
+  let sodiumKnownCount = 0;
+  let potassiumKnownCount = 0;
+  let ironKnownCount = 0;
+  let calciumKnownCount = 0;
+  let vitaminCKnownCount = 0;
+  let omega3KnownCount = 0;
+
   const byMealType = { Desayuno: [], Almuerzo: [], Merienda: [], Cena: [] };
+
+  const resolveOptionalNumber = (directVal, scaledVal) => {
+    if (directVal !== undefined && directVal !== null && directVal !== '' && Number.isFinite(Number(directVal))) {
+      return Number(directVal);
+    }
+    if (scaledVal !== undefined && scaledVal !== null && Number.isFinite(Number(scaledVal))) {
+      return Number(scaledVal);
+    }
+    return null;
+  };
 
   dayLogs.forEach(entry => {
     const refFood = entry.foodId
@@ -402,27 +502,49 @@ export function analyzeDayClinicalMetrics({ dayLogs = [], userProfile = {} }) {
     const carbs = Number(entry.carbs ?? entry.carbsGrams) || 0;
     const fat = Number(entry.fat ?? entry.fatGrams) || 0;
     const fiber = Number(entry.fiber ?? entry.fiberGrams ?? scaled?.fiber) || 0;
-    const sodiumMg = Number(entry.sodiumMg ?? scaled?.sodiumMg) || Math.round(kcal * 0.65);
-    const potassiumMg = Number(entry.potassiumMg ?? scaled?.potassiumMg) || Math.round(kcal * 1.3);
-    const ironMg = Number(entry.ironMg ?? scaled?.ironMg) || Number((kcal * 0.005).toFixed(1));
-    const calciumMg = Number(entry.calciumMg ?? scaled?.calciumMg) || Math.round(kcal * 0.35);
-    const vitaminCMg = Number(entry.vitaminCMg ?? scaled?.vitaminCMg) || 0;
-    const omega3Mg = Number(entry.omega3Mg ?? scaled?.omega3Mg) || 0;
+
+    // CERO valores inventados a partir de calorías: solo datos reales o null
+    const sodiumMg = resolveOptionalNumber(entry.sodiumMg, scaled?.sodiumMg);
+    const potassiumMg = resolveOptionalNumber(entry.potassiumMg, scaled?.potassiumMg);
+    const ironMg = resolveOptionalNumber(entry.ironMg, scaled?.ironMg);
+    const calciumMg = resolveOptionalNumber(entry.calciumMg, scaled?.calciumMg);
+    const vitaminCMg = resolveOptionalNumber(entry.vitaminCMg, scaled?.vitaminCMg);
+    const omega3Mg = resolveOptionalNumber(entry.omega3Mg, scaled?.omega3Mg);
+
     const netCarbs = Math.max(0, carbs - fiber);
     const glycemicLoad =
-      Number(entry.glycemicLoad ?? scaled?.glycemicLoad) || Number(((netCarbs * 48) / 100).toFixed(1));
+      resolveOptionalNumber(entry.glycemicLoad, scaled?.glycemicLoad) ??
+      Number(((netCarbs * 48) / 100).toFixed(1));
 
     totalKcal += kcal;
     totalProtein += protein;
     totalCarbs += carbs;
     totalFat += fat;
     totalFiber += fiber;
-    totalSodiumMg += sodiumMg;
-    totalPotassiumMg += potassiumMg;
-    totalIronMg = Number((totalIronMg + ironMg).toFixed(1));
-    totalCalciumMg += calciumMg;
-    totalVitaminCMg += vitaminCMg;
-    totalOmega3Mg += omega3Mg;
+    if (sodiumMg !== null) {
+      totalSodiumMg += sodiumMg;
+      sodiumKnownCount += 1;
+    }
+    if (potassiumMg !== null) {
+      totalPotassiumMg += potassiumMg;
+      potassiumKnownCount += 1;
+    }
+    if (ironMg !== null) {
+      totalIronMg = Number((totalIronMg + ironMg).toFixed(1));
+      ironKnownCount += 1;
+    }
+    if (calciumMg !== null) {
+      totalCalciumMg += calciumMg;
+      calciumKnownCount += 1;
+    }
+    if (vitaminCMg !== null) {
+      totalVitaminCMg += vitaminCMg;
+      vitaminCKnownCount += 1;
+    }
+    if (omega3Mg !== null) {
+      totalOmega3Mg += omega3Mg;
+      omega3KnownCount += 1;
+    }
     totalGlycemicLoad = Number((totalGlycemicLoad + glycemicLoad).toFixed(1));
 
     if (entry.mealType === 'Cena') {
@@ -445,21 +567,36 @@ export function analyzeDayClinicalMetrics({ dayLogs = [], userProfile = {} }) {
     if (mealProt >= 24) anabolicMealsCount += 1;
   });
 
-  const naKRatio = totalPotassiumMg > 0 ? Number((totalSodiumMg / totalPotassiumMg).toFixed(2)) : 0;
+  const n = dayLogs.length;
+  const pct = count => (n > 0 ? Math.round((count / n) * 100) : 0);
+  const coverage = {
+    totalEntries: n,
+    sodiumPct: pct(sodiumKnownCount),
+    potassiumPct: pct(potassiumKnownCount),
+    ironPct: pct(ironKnownCount),
+    calciumPct: pct(calciumKnownCount),
+    vitaminCPct: pct(vitaminCKnownCount),
+    omega3Pct: pct(omega3KnownCount)
+  };
+
+  const naKRatio =
+    sodiumKnownCount > 0 && potassiumKnownCount > 0 && totalPotassiumMg > 0
+      ? Number((totalSodiumMg / totalPotassiumMg).toFixed(2))
+      : null;
   const glycemicLoadLevel =
     totalGlycemicLoad <= 75 ? 'Baja (Estable)' : totalGlycemicLoad <= 110 ? 'Moderada' : 'Alta (Vigilar picos)';
-  const ironSynergyActive = totalIronMg >= 4 && totalVitaminCMg >= 25;
+  const ironSynergyActive = ironKnownCount > 0 && totalIronMg >= 4 && totalVitaminCMg >= 25;
 
   const clinicalFindings = [];
-  if (dayLogs.length > 0) {
-    if (totalSodiumMg > targets.sodiumMaxMg) {
+  if (n > 0) {
+    if (sodiumKnownCount > 0 && totalSodiumMg > targets.sodiumMaxMg) {
       clinicalFindings.push(
-        `Alerta DASH/KDIGO: el sodio registrado (${totalSodiumMg} mg) supera tu tope diario (${targets.sodiumMaxMg} mg). Hidrátate y prioriza vegetales frescos sin sal añadida.`
+        `Alerta DASH/KDIGO: el sodio verificado (${totalSodiumMg} mg, cobertura ${coverage.sodiumPct}%) supera tu tope diario (${targets.sodiumMaxMg} mg). Hidrátate y prioriza vegetales frescos sin sal añadida.`
       );
     }
-    if (totalIronMg >= 3.5 && totalVitaminCMg < 20) {
+    if (coverage.ironPct >= 50 && totalIronMg >= 3.5 && vitaminCKnownCount > 0 && totalVitaminCMg < 20) {
       clinicalFindings.push(
-        `Sinergia de Hierro OMS: llevas ${totalIronMg} mg de hierro pero poca Vitamina C (${totalVitaminCMg} mg). Agrega limón, guayaba, naranja o pimiento para triplicar su absorción.`
+        `Sinergia de Hierro OMS: llevas ${totalIronMg} mg de hierro pero poca Vitamina C (${totalVitaminCMg} mg). Agrega limón, guayaba, naranja o pimiento para mejorar su absorción.`
       );
     }
     if (totalGlycemicLoad > targets.glycemicLoadMaxDaily) {
@@ -469,7 +606,7 @@ export function analyzeDayClinicalMetrics({ dayLogs = [], userProfile = {} }) {
     }
     if (dinnerKcal > totalKcal * 0.42 && totalKcal > 900) {
       clinicalFindings.push(
-        `Crononutrición ESPEN: la cena concentra más del 40% de tus calorías del día. Repartir más energía en desayuno y almuerzo mejora la sensibilidad a la insulina.`
+        `Distribución energética: la cena concentra más del 40% de tus calorías del día. Repartir más energía en desayuno y almuerzo favorece la glucemia y el descanso.`
       );
     }
   }
@@ -481,14 +618,15 @@ export function analyzeDayClinicalMetrics({ dayLogs = [], userProfile = {} }) {
       carbs: totalCarbs,
       fat: totalFat,
       fiber: totalFiber,
-      sodiumMg: totalSodiumMg,
-      potassiumMg: totalPotassiumMg,
-      ironMg: totalIronMg,
-      calciumMg: totalCalciumMg,
-      vitaminCMg: totalVitaminCMg,
-      omega3Mg: totalOmega3Mg,
+      sodiumMg: sodiumKnownCount > 0 ? totalSodiumMg : null,
+      potassiumMg: potassiumKnownCount > 0 ? totalPotassiumMg : null,
+      ironMg: ironKnownCount > 0 ? totalIronMg : null,
+      calciumMg: calciumKnownCount > 0 ? totalCalciumMg : null,
+      vitaminCMg: vitaminCKnownCount > 0 ? totalVitaminCMg : null,
+      omega3Mg: omega3KnownCount > 0 ? totalOmega3Mg : null,
       glycemicLoad: totalGlycemicLoad
     },
+    coverage,
     targets,
     naKRatio,
     glycemicLoadLevel,
@@ -553,6 +691,7 @@ export function buildCompletePersonContext(userProfile = {}, workspace = {}, cur
   return {
     todayIso,
     currentHour,
+    profileConfigured: Boolean(userProfile?.dailyCalories),
     todayMeals,
     consumed,
     goals: {
@@ -696,7 +835,7 @@ export function generateProactiveDailyRoadmap(userProfile = {}, workspace = {}, 
   const hasHypertension = ctx.protocols.some(p => p.id === 'hipertension_cardiovascular');
   const hasCholesterol = ctx.protocols.some(p => p.id === 'colesterol_trigliceridos' || p.id === 'higado_graso_metabolico');
   const hasThyroid = ctx.protocols.some(p => p.id === 'hipotiroidismo_metabolico');
-  const drugNutrientInteractions = resolveDrugNutrientInteractions(ctx.protocols);
+  const drugNutrientInteractions = resolveDrugNutrientInteractions(ctx.protocols, userProfile);
 
   if (hasRenal) {
     immediateActions.push({

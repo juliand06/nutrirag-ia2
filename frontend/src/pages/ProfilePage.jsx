@@ -5,6 +5,8 @@ import {
   resolveUserClinicalProtocols,
   resolveDrugNutrientInteractions
 } from '../lib/proactiveAiEngine';
+import VoluntaryClinicalHistoryCard from '../components/VoluntaryClinicalHistoryCard';
+import SmartNotificationSettingsCard from '../components/SmartNotificationSettingsCard';
 
 const PROFILE_HEALTH_CONDITIONS = [
   { id: 'ninguna', label: 'Ninguna en particular' },
@@ -62,7 +64,7 @@ export default function ProfilePage() {
     healthConditions,
     allergies
   });
-  const activeDrugAlerts = resolveDrugNutrientInteractions(activeProtocols);
+  const activeDrugAlerts = resolveDrugNutrientInteractions(activeProtocols, currentUser);
 
   const toggleCondition = (id) => {
     if (id === 'ninguna') {
@@ -348,15 +350,11 @@ export default function ProfilePage() {
             </div>
           </section>
 
-          {/* Estado honesto de integraciones clínicas (CERO datos clínicos ficticios) */}
-          <section className="ns-card ns-card-warm">
-            <h2 style={{ fontSize: '1.15rem', marginBottom: '6px' }}>
-              Expediente clínico y laboratorios (No conectado)
-            </h2>
-            <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-              Actualmente no hay ningún servidor hospitalario HL7 FHIR ni resultados de laboratorio vinculados a tu cuenta. Por transparencia y ética clínica, NutriStudio nunca muestra exámenes ni biomarcadores ficticios.
-            </p>
-          </section>
+          {/* Recordatorios y Notificaciones inteligentes */}
+          <SmartNotificationSettingsCard />
+
+          {/* Historial clínico voluntario (100% opt-in, cero datos ficticios) */}
+          <VoluntaryClinicalHistoryCard />
 
           {/* Exportar y borrar mis datos */}
           <section className="ns-card">
