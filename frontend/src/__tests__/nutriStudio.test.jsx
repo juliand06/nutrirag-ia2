@@ -26,9 +26,12 @@ import {
 import {
   evaluateAcuteMedicalEmergency,
   queryHybridRag,
-  sanitizeRagAnswerForUser
+  sanitizeRagAnswerForUser,
+  validateRagAnswerAllergens
 } from '../lib/nutriRagEngine';
+import { buildCoachContext } from '../lib/coachContextBuilder';
 import { GLOBAL_FOOD_DATABASE, scaleFoodPortion as scaleLibFoodPortion } from '../lib/foodDatabase';
+import { recalculateVisionAnalysis } from '../services/mealPhotoVisionService';
 import {
   registerWithOnboarding,
   loginWithEmail,
@@ -42,6 +45,7 @@ import { parseNutritionCsvImport } from '../services/openFoodFactsService';
 import { computeGamificationState, computeWellnessCorrelations } from '../services/retentionEngine';
 import { evaluateClinicalSafety } from '../services/clinicalSafetyGuard';
 import { runRagEvaluationBenchmark } from '../services/ragEvaluationDataset';
+import { evaluateSmartReminders, DEFAULT_NOTIFICATION_SETTINGS } from '../services/notificationService';
 import {
   connectSmartOnFhirSandbox,
   buildInitialClinicalRecordForEmail,
@@ -216,8 +220,19 @@ describe('NutriStudio AI — Reconstrucción Editorial + Suite Completa', () => 
     expect(renalAthleteProtocols.some(p => p.id === 'rendimiento_deportivo')).toBe(false);
     expect(renalAthleteProtocols.some(p => p.id === 'hipotiroidismo_metabolico')).toBe(true);
 
-    const drugInteractions = resolveDrugNutrientInteractions(renalAthleteProtocols);
-    expect(drugInteractions.some(d => d.medications.toLowerCase().includes('levotiroxina'))).toBe(true);
+    // Farmacovigilancia SOLO por medicamento real declarado (nunca warfarina por solo colesterol)
+    expect(resolveDrugNutrientInteractions(renalAthleteProtocols, { healthConditions: ['colesterol'] })).toEqual([]);
+    const levoInteractions = resolveDrugNutrientInteractions(renalAthleteProtocols, {
+      voluntaryClinicalHistory: { consentGranted: true, medications: 'Levotiroxina 50 mcg' }
+    });
+    expect(levoInteractions.some(d => d.medications.toLowerCase().includes('levotiroxina'))).toBe(true);
+    expect(levoInteractions.some(d => d.medications.toLowerCase().includes('warfarina'))).toBe(false);
+
+    const warfarinaInteractions = resolveDrugNutrientInteractions([], {
+      voluntaryClinicalHistory: { consentGranted: true, medications: 'Warfarina 5 mg' }
+    });
+    expect(warfarinaInteractions).toHaveLength(1);
+    expect(warfarinaInteractions[0].medications).toMatch(/Warfarina/i);
 
     // 2. En diabetes (ADA), fruta entera fresca NOVA 1 (banano) es 'optimal', mientras que gaseosa NOVA 4 es 'caution'
     const diabeticProfile = {
@@ -247,20 +262,22 @@ describe('NutriStudio AI — Reconstrucción Editorial + Suite Completa', () => 
     expect(chestEmergency.guardrailTriggered).toBe(true);
     expect(chestEmergency.emergencyCategory).toBe('URGENCIA_MEDICA_AGUDA');
 
-    // 4. Sanitizador post-RAG contra alérgenos/disgustos y redistribución calórica renal + geriatría
+    // 4. Sanitizador post-RAG NO invierte frases de exclusión ("Evita el queso") y sí alerta en menciones afirmativas
     const veganNoSoyProfile = {
       dietType: 'vegana',
-      allergies: ['Soya'],
+      allergies: ['Lactosa / Lácteos', 'Soya'],
       dislikedFoods: 'brócoli'
     };
-    const sanitized = sanitizeRagAnswerForUser(
-      'Te recomiendo pechuga de pollo con yogur griego y brócoli al vapor.',
-      veganNoSoyProfile,
-      { dishName: 'Lentejas con quinua y aguacate' }
-    );
-    expect(sanitized.toLowerCase()).not.toContain('pechuga de pollo');
-    expect(sanitized.toLowerCase()).not.toContain('yogur griego');
-    expect(sanitized.toLowerCase()).not.toContain('brócoli');
+    const exclusionAdvice = 'Evita el queso y la leche entera en tu desayuno.';
+    const validatedExclusion = validateRagAnswerAllergens(exclusionAdvice, veganNoSoyProfile);
+    expect(validatedExclusion.safe).toBe(true);
+    expect(sanitizeRagAnswerForUser(exclusionAdvice, veganNoSoyProfile)).toBe(exclusionAdvice);
+
+    const unsafeAdvice = 'Te recomiendo pechuga de pollo con yogur griego.';
+    const validatedUnsafe = validateRagAnswerAllergens(unsafeAdvice, veganNoSoyProfile);
+    expect(validatedUnsafe.safe).toBe(false);
+    expect(validatedUnsafe.flaggedTerms).toContain('pechuga de pollo');
+    expect(sanitizeRagAnswerForUser(unsafeAdvice, veganNoSoyProfile)).toMatch(/Nota de seguridad de tu perfil/i);
 
     // Redistribución calórica en condición renal (KDIGO) evita déficit oculto
     const renalSummary = buildPersonalizedNutritionSummary({
@@ -302,6 +319,144 @@ describe('NutriStudio AI — Reconstrucción Editorial + Suite Completa', () => 
     expect(dayAnalysis.totals.vitaminCMg).toBeGreaterThan(200);
     expect(dayAnalysis.ironSynergyActive).toBe(true);
     expect(dayAnalysis.totals.glycemicLoad).toBeGreaterThan(0);
+
+    // 5. Recálculo en vivo del Escáner de Fotos con Visión IA y detección determinista de alérgenos
+    const visionSample = recalculateVisionAnalysis(
+      {
+        isFoodValid: true,
+        dishName: 'Huevos revueltos con arepa y queso',
+        detectedAllergens: ['huevo', 'lacteos'],
+        ingredients: [
+          {
+            id: 'ing-1',
+            name: 'Huevos revueltos',
+            estimatedGrams: 120,
+            baseGrams: 120,
+            baseKcal: 180,
+            baseProtein: 14,
+            baseCarbs: 1,
+            baseFat: 13,
+            baseFiber: 0,
+            baseSodiumMg: 220,
+            basePotassiumMg: 150,
+            baseIronMg: 1.8,
+            baseCalciumMg: 60,
+            baseVitaminCMg: 0,
+            baseOmega3Mg: 80,
+            glycemicIndex: 'Bajo'
+          },
+          {
+            id: 'ing-2',
+            name: 'Arepa de maíz integral',
+            estimatedGrams: 100,
+            baseGrams: 100,
+            baseKcal: 215,
+            baseProtein: 5,
+            baseCarbs: 42,
+            baseFat: 2,
+            baseFiber: 4,
+            baseSodiumMg: 120,
+            basePotassiumMg: 130,
+            baseIronMg: 1.1,
+            baseCalciumMg: 20,
+            baseVitaminCMg: 0,
+            baseOmega3Mg: 15,
+            glycemicIndex: 'Medio'
+          }
+        ]
+      },
+      { allergies: ['Lactosa / Lácteos'], dietType: 'omnivora' }
+    );
+    expect(visionSample.totals.kcal).toBe(395);
+    expect(visionSample.totals.protein).toBe(19);
+    expect(visionSample.totals.glycemicLoad).toBeGreaterThan(15);
+    expect(visionSample.compatibility.compatible).toBe(false);
+    expect(visionSample.safetyAlerts.length).toBeGreaterThan(0);
+
+    // 6. Historial clínico voluntario (opt-in): activa protocolos reales solo con consentimiento
+    const voluntaryProtocols = resolveUserClinicalProtocols({
+      voluntaryClinicalHistory: {
+        consentGranted: true,
+        fastingGlucose: 114,
+        bloodPressure: '138/88',
+        medications: 'Levotiroxina 50 mcg'
+      }
+    });
+    expect(voluntaryProtocols.some(p => p.id === 'resistencia_insulina_diabetes')).toBe(true);
+    expect(voluntaryProtocols.some(p => p.id === 'hipertension_cardiovascular')).toBe(true);
+    expect(voluntaryProtocols.some(p => p.id === 'hipotiroidismo_metabolico')).toBe(true);
+
+    const noConsentProtocols = resolveUserClinicalProtocols({
+      voluntaryClinicalHistory: {
+        consentGranted: false,
+        fastingGlucose: 140
+      }
+    });
+    expect(noConsentProtocols.some(p => p.id === 'resistencia_insulina_diabetes')).toBe(false);
+
+    // 7. Límites de palabra en protocolos, conversión mmol/L -> mg/dL, vigencia >6 meses, cobertura real y contexto 5 capas
+    const falseSubstrings = resolveUserClinicalProtocols({
+      healthConditions: ['depresión', 'fatiga adrenal', 'hemocromatosis con exceso de hierro']
+    });
+    expect(falseSubstrings.some(p => p.id === 'hipertension_cardiovascular')).toBe(false);
+    expect(falseSubstrings.some(p => p.id === 'salud_renal_kdigo')).toBe(false);
+    expect(falseSubstrings.some(p => p.id === 'anemia_fatiga')).toBe(false);
+
+    const mmolProtocols = resolveUserClinicalProtocols({
+      voluntaryClinicalHistory: {
+        consentGranted: true,
+        labUnit: 'mmol',
+        examDate: '2026-11-15',
+        fastingGlucose: 6.4
+      }
+    });
+    expect(mmolProtocols.some(p => p.id === 'resistencia_insulina_diabetes')).toBe(true);
+
+    const staleLabProtocols = resolveUserClinicalProtocols({
+      voluntaryClinicalHistory: {
+        consentGranted: true,
+        labUnit: 'mgdl',
+        examDate: '2023-01-10',
+        fastingGlucose: 180
+      }
+    });
+    expect(staleLabProtocols.some(p => p.id === 'resistencia_insulina_diabetes')).toBe(false);
+
+    // Sin micronutrientes inventados en registros manuales sin datos
+    const manualOnlyAnalysis = analyzeDayClinicalMetrics({
+      dayLogs: [{ mealType: 'Desayuno', dishName: 'Plato casero', kcal: 450, protein: 20, carbs: 50, fat: 15 }],
+      userProfile: {}
+    });
+    expect(manualOnlyAnalysis.totals.sodiumMg).toBeNull();
+    expect(manualOnlyAnalysis.coverage.sodiumPct).toBe(0);
+
+    // Emergencias precisas: pregunta educativa NO dispara alerta; angioedema/DKA SÍ
+    expect(evaluateAcuteMedicalEmergency('¿Qué es la hipoglucemia?').isEmergency).toBe(false);
+    expect(evaluateAcuteMedicalEmergency('Tengo labios hinchados y dificultad para respirar').isEmergency).toBe(true);
+    expect(evaluateAcuteMedicalEmergency('Tengo vómito y sed extrema con aliento afrutado').isEmergency).toBe(true);
+
+    // Ensamblador de contexto de 5 capas del Coach
+    const coachContext = buildCoachContext({
+      question: '¿Qué puedo cenar hoy?',
+      userProfile: {
+        dietType: 'sin_lactosa',
+        allergies: ['Lactosa / Lácteos'],
+        voluntaryClinicalHistory: { consentGranted: true, medications: 'Levotiroxina' }
+      },
+      workspace: {
+        mealLogs: [],
+        aiMemoryFacts: [{ id: 'f-1', text: 'Ceno a las 9 pm por trabajo' }]
+      },
+      chatHistory: [
+        { role: 'user', text: 'Hola' },
+        { role: 'assistant', text: '¡Hola! ¿En qué te ayudo?' }
+      ]
+    });
+    expect(coachContext.intent).toBe('meal_suggestion');
+    expect(coachContext.safetyAndStableFicha.allergies).toContain('Lactosa / Lácteos');
+    expect(coachContext.safetyAndStableFicha.userConfirmedFacts).toContain('Ceno a las 9 pm por trabajo');
+    expect(coachContext.recentConversation).toHaveLength(2);
+    expect(coachContext.usedFacts.length).toBeGreaterThanOrEqual(2);
   });
 
   it('registra y autentica con authClient sin guardar nunca la contraseña en localStorage', async () => {
@@ -463,12 +618,15 @@ describe('NutriStudio AI — Reconstrucción Editorial + Suite Completa', () => 
     expect(corrs.some(c => c.includes('Sueño vs. Apetito'))).toBe(true);
   });
 
-  it('deriva a profesional ante embarazo, diabetes tipo 1, TCA, menores o dietas <1200 kcal', () => {
+  it('deriva a profesional ante embarazo, diabetes tipo 1, TCA, menores o dietas <1200 kcal sin falsos positivos', () => {
     expect(evaluateClinicalSafety('Estoy embarazada y quiero déficit calórico').blocked).toBe(true);
     expect(evaluateClinicalSafety('Tengo diabetes tipo 1, ¿cuánta insulina me pongo?').blocked).toBe(true);
     expect(evaluateClinicalSafety('Quiero una dieta de 700 kcal al día').blocked).toBe(true);
     expect(evaluateClinicalSafety('Quiero adelgazar rápido', { age: 15 }).blocked).toBe(true);
+    expect(evaluateClinicalSafety('¿Cómo hacer un déficit calórico?', { healthConditions: ['embarazo_lactancia'] }).blocked).toBe(true);
     expect(evaluateClinicalSafety('¿Cuánta proteína tiene el salmón?', { age: 28 }).blocked).toBe(false);
+    expect(evaluateClinicalSafety('Quiero dejar de comer azúcar refinada').blocked).toBe(false);
+    expect(evaluateClinicalSafety('¿Un almuerzo de 500 kcal es adecuado?').blocked).toBe(false);
   });
 
   it('evalúa el RAG con dataset de 50 preguntas y cumple umbral de Recall@3 y MRR', () => {
@@ -601,5 +759,24 @@ describe('NutriStudio AI — Reconstrucción Editorial + Suite Completa', () => 
 
     await cancelStripeSubscription(registered.id, registered.email);
     await purgeAllUserDataGdpr(registered.id);
+
+    // Sistema de Notificaciones y Recordatorios Inteligentes de comida y agua
+    const testNow = new Date('2026-11-24T13:15:00'); // 1:15 pm (hora de almuerzo)
+    const reminder = evaluateSmartReminders({
+      currentUser: { id: 'u-rem', name: 'Julián Test', dailyCalories: 2200, waterGlassesTarget: 8 },
+      workspace: {
+        mealLogs: [],
+        waterGlassesByDate: { '2026-11-24': 2 },
+        notificationSettings: {
+          ...DEFAULT_NOTIFICATION_SETTINGS,
+          enabled: true,
+          schedules: { desayuno: '08:00', almuerzo: '13:00', merienda: '16:30', cena: '20:00' }
+        }
+      },
+      now: testNow
+    });
+    expect(reminder).not.toBeNull();
+    expect(reminder.type).toBe('meal');
+    expect(reminder.title).toContain('Almuerzo');
   });
 });

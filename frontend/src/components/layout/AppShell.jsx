@@ -1,55 +1,60 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useNutriStore } from '../../store/useNutriStore';
 import { HandLeafIcon } from '../../assets/doodles/HandDrawnSvgs';
-import { generateProactiveDailyRoadmap } from '../../lib/proactiveAiEngine';
 import QuickAddModal from './QuickAddModal';
 import { Toast } from '../../design-system';
+import { evaluateSmartReminders, sendBrowserNotification } from '../../services/notificationService';
 
 const DESKTOP_LINKS = [
   { to: '/app', label: 'Inicio', end: true },
+  { to: '/app/coach', label: 'Coach con IA' },
   { to: '/app/diario', label: 'Diario de comidas' },
   { to: '/app/alimentos', label: 'Alimentos y escáner' },
-  { to: '/app/aprende', label: 'Aprende a comer bien' },
   { to: '/app/planes', label: 'Planes y compras' },
-  { to: '/app/coach', label: 'Coach con IA' },
   { to: '/app/progreso', label: 'Mi progreso' },
-  { to: '/app/perfil', label: 'Perfil y ajustes' }
+  { to: '/app/aprende', label: 'Aprende' },
+  { to: '/app/perfil', label: 'Perfil y salud' }
 ];
 
 export default function AppShell({ children }) {
   const navigate = useNavigate();
-  const [copilotMinimized, setCopilotMinimized] = React.useState(false);
   const currentUser = useNutriStore(s => s.currentUser);
-  const workspace = useNutriStore(s => s.workspace);
   const themeMode = useNutriStore(s => s.themeMode);
   const toggleThemeMode = useNutriStore(s => s.toggleThemeMode);
   const setQuickAddOpen = useNutriStore(s => s.setQuickAddOpen);
-  const addMealEntry = useNutriStore(s => s.addMealEntry);
-  const setWaterGlassesForDate = useNutriStore(s => s.setWaterGlassesForDate);
   const logout = useNutriStore(s => s.logout);
   const toast = useNutriStore(s => s.toast);
   const clearToast = useNutriStore(s => s.clearToast);
+  const workspace = useNutriStore(s => s.workspace);
 
-  const roadmap = generateProactiveDailyRoadmap(currentUser || {}, workspace || {});
-  const topAction = roadmap.immediateActions[0];
-  const todayIso = roadmap.context.todayIso;
+  const [activeBannerReminder, setActiveBannerReminder] = useState(null);
+
+  // Verificador periódico de recordatorios inteligentes (cada 30s mientras la app esté abierta)
+  useEffect(() => {
+    if (!currentUser || !workspace) return;
+
+    const checkReminders = () => {
+      const reminder = evaluateSmartReminders({ currentUser, workspace, now: new Date() });
+      if (reminder) {
+        setActiveBannerReminder(reminder);
+        // Si el usuario tiene permisos concedidos de Web Notifications, emitir notificación nativa
+        sendBrowserNotification(reminder.title, {
+          body: reminder.body,
+          tag: reminder.id
+        });
+      }
+    };
+
+    // Verificación inicial inmediata y luego intervalo
+    checkReminders();
+    const interval = setInterval(checkReminders, 30000);
+    return () => clearInterval(interval);
+  }, [currentUser, workspace]);
 
   const handleLogout = async () => {
     await logout();
     navigate('/');
-  };
-
-  const handleExecuteTopAction = () => {
-    if (!topAction) return;
-    if (topAction.actionType === 'log_meal' && topAction.mealPayload) {
-      addMealEntry({
-        date: todayIso,
-        ...topAction.mealPayload
-      });
-    } else if (topAction.actionType === 'add_water') {
-      setWaterGlassesForDate(todayIso, roadmap.context.waterGlassesToday + 1);
-    }
   };
 
   return (
@@ -124,24 +129,6 @@ export default function AppShell({ children }) {
               </NavLink>
             ))}
           </nav>
-
-          {/* Tarjeta lateral de protocolo clínico activo */}
-          {roadmap.protocols[0] && (
-            <div
-              className="ns-card ns-card-sage"
-              style={{ marginTop: '18px', padding: '12px 14px', fontSize: '0.8rem' }}
-            >
-              <div style={{ fontWeight: 700, color: 'var(--brand-leaf)', marginBottom: '4px' }}>
-                IA Clínica Activa
-              </div>
-              <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                {roadmap.protocols[0].label}
-              </div>
-              <div style={{ color: 'var(--text-secondary)', marginTop: '2px', fontSize: '0.75rem' }}>
-                {roadmap.protocols[0].source}
-              </div>
-            </div>
-          )}
         </div>
 
         <div
@@ -215,56 +202,44 @@ export default function AppShell({ children }) {
         </header>
 
         <main className="ns-main-content">
-          {/* Franja de Copiloto Clínico Proactivo Omnipresente: guía sin necesidad de preguntar (minimizable en móvil) */}
-          {topAction && (
+          {/* Banner de Recordatorio Inteligente Contextual si coincide con hora de comida o agua */}
+          {activeBannerReminder && (
             <div
-              role="region"
-              aria-label="Guía proactiva del día"
+              role="alert"
               className="ns-card ns-card-sage"
               style={{
-                padding: copilotMinimized ? '8px 14px' : '12px 18px',
-                marginBottom: '22px',
+                marginBottom: '18px',
+                padding: '12px 16px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                flexWrap: 'wrap',
-                gap: '10px',
+                gap: '12px',
                 borderLeft: '4px solid var(--brand-leaf)'
               }}
             >
-              <div style={{ flex: '1 1 280px' }}>
-                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-leaf)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  Guía IA en vivo ({roadmap.timeWindowLabel}) · {roadmap.protocols[0]?.source}
-                </div>
-                {!copilotMinimized && (
-                  <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
-                    {topAction.title}
-                  </div>
-                )}
+              <div>
+                <strong style={{ color: 'var(--brand-leaf)', fontSize: '0.92rem', display: 'block' }}>
+                  {activeBannerReminder.title}
+                </strong>
+                <span style={{ fontSize: '0.86rem', color: 'var(--text-secondary)' }}>
+                  {activeBannerReminder.body}
+                </span>
               </div>
-
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                {!copilotMinimized && topAction.actionType !== 'none' && (
-                  <button
-                    type="button"
-                    onClick={handleExecuteTopAction}
-                    className="ns-btn ns-btn-leaf ns-btn-sm"
-                  >
-                    {topAction.actionLabel}
-                  </button>
-                )}
-                {!copilotMinimized && (
-                  <NavLink to="/app/coach" className="ns-btn ns-btn-outline ns-btn-sm">
-                    Ver detalle clínico
-                  </NavLink>
-                )}
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <NavLink
+                  to={activeBannerReminder.actionUrl || '/app'}
+                  className="ns-btn ns-btn-leaf ns-btn-sm"
+                  onClick={() => setActiveBannerReminder(null)}
+                >
+                  Registrar
+                </NavLink>
                 <button
                   type="button"
-                  onClick={() => setCopilotMinimized(prev => !prev)}
+                  onClick={() => setActiveBannerReminder(null)}
                   className="ns-btn ns-btn-ghost ns-btn-sm"
-                  aria-label={copilotMinimized ? 'Expandir guía clínica' : 'Minimizar guía clínica'}
+                  aria-label="Cerrar recordatorio"
                 >
-                  {copilotMinimized ? 'Mostrar guía' : 'Minimizar'}
+                  ✕
                 </button>
               </div>
             </div>
