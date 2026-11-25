@@ -12,7 +12,14 @@ export default function SmartNotificationSettingsCard() {
   const updateNotificationSettings = useNutriStore(s => s.updateNotificationSettings);
   const showToast = useNutriStore(s => s.showToast);
 
-  const settings = workspace?.notificationSettings || DEFAULT_NOTIFICATION_SETTINGS;
+  const settings = {
+    ...DEFAULT_NOTIFICATION_SETTINGS,
+    ...(workspace?.notificationSettings || {}),
+    schedules: {
+      ...DEFAULT_NOTIFICATION_SETTINGS.schedules,
+      ...(workspace?.notificationSettings?.schedules || {})
+    }
+  };
 
   const [testingNotif, setTestingNotif] = useState(false);
 
@@ -169,6 +176,50 @@ export default function SmartNotificationSettingsCard() {
               />
               <span>Mensaje si paso más de 1 día sin registrar para retomar el ritmo fácilmente</span>
             </label>
+
+            {[
+              ['medicationReminders', 'Recordarme mis medicamentos (solo si los declaré en mi historial voluntario)'],
+              ['wellnessCheckInReminders', 'Recordarme el chequeo rápido de bienestar de 10 segundos'],
+              ['proteinReminders', 'Avisarme por la tarde si voy muy por debajo de mi meta de proteína'],
+              ['weeklyWeightReminders', 'Recordarme mi pesaje semanal'],
+              ['labsStaleReminders', 'Avisarme si mis exámenes de laboratorio tienen más de 6 meses']
+            ].map(([key, label]) => (
+              <label key={key} style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(settings[key])}
+                  onChange={e => updateNotificationSettings({ [key]: e.target.checked })}
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
+              <div>
+                <label htmlFor="notif-time-medicamento" style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>
+                  💊 Hora de medicamentos
+                </label>
+                <input
+                  id="notif-time-medicamento"
+                  type="time"
+                  className="ns-input"
+                  value={settings.schedules.medicamento}
+                  onChange={e => handleTimeChange('medicamento', e.target.value)}
+                />
+              </div>
+              <div>
+                <label htmlFor="notif-time-chequeo" style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>
+                  🌿 Hora del chequeo de bienestar
+                </label>
+                <input
+                  id="notif-time-chequeo"
+                  type="time"
+                  className="ns-input"
+                  value={settings.schedules.chequeo}
+                  onChange={e => handleTimeChange('chequeo', e.target.value)}
+                />
+              </div>
+            </div>
           </div>
 
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', paddingTop: '4px' }}>

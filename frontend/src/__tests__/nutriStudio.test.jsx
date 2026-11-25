@@ -778,5 +778,39 @@ describe('NutriStudio AI — Reconstrucción Editorial + Suite Completa', () => 
     expect(reminder).not.toBeNull();
     expect(reminder.type).toBe('meal');
     expect(reminder.title).toContain('Almuerzo');
+
+    // Avisos adicionales: medicamentos declarados, chequeo de bienestar y exámenes viejos
+    const baseSettings = { ...DEFAULT_NOTIFICATION_SETTINGS, enabled: true, mealReminders: false, waterReminders: false };
+    const medReminder = evaluateSmartReminders({
+      currentUser: {
+        id: 'u-med',
+        name: 'Ana',
+        voluntaryClinicalHistory: { consentGranted: true, medications: 'Metformina' }
+      },
+      workspace: { mealLogs: [], notificationSettings: baseSettings },
+      now: new Date('2026-12-01T09:10:00')
+    });
+    expect(medReminder?.type).toBe('medication');
+
+    const noMedsWithoutConsent = evaluateSmartReminders({
+      currentUser: { id: 'u-nomed', name: 'Ana', voluntaryClinicalHistory: { consentGranted: false, medications: 'Metformina' } },
+      workspace: { mealLogs: [], notificationSettings: baseSettings },
+      now: new Date('2026-12-02T09:10:00')
+    });
+    expect(noMedsWithoutConsent?.type).not.toBe('medication');
+
+    const wellnessReminder = evaluateSmartReminders({
+      currentUser: { id: 'u-well', name: 'Ana' },
+      workspace: { mealLogs: [], wellnessCheckIns: [], notificationSettings: baseSettings },
+      now: new Date('2026-12-03T18:10:00')
+    });
+    expect(wellnessReminder?.type).toBe('wellness');
+
+    const labsReminder = evaluateSmartReminders({
+      currentUser: { id: 'u-lab', name: 'Ana', voluntaryClinicalHistory: { consentGranted: true, examDate: '2026-01-10' } },
+      workspace: { mealLogs: [], notificationSettings: { ...baseSettings, medicationReminders: false } },
+      now: new Date('2026-12-04T12:00:00')
+    });
+    expect(labsReminder?.type).toBe('labs');
   });
 });

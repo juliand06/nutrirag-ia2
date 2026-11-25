@@ -8,11 +8,18 @@ export const DEFAULT_NOTIFICATION_SETTINGS = {
   mealReminders: true,
   waterReminders: true,
   inactivityAlerts: true,
+  medicationReminders: true,
+  wellnessCheckInReminders: true,
+  weeklyWeightReminders: true,
+  proteinReminders: true,
+  labsStaleReminders: true,
   schedules: {
     desayuno: '08:00',
     almuerzo: '13:00',
     merienda: '16:30',
-    cena: '20:00'
+    cena: '20:00',
+    medicamento: '09:00',
+    chequeo: '18:00'
   },
   waterIntervalHours: 2.5
 };
@@ -106,7 +113,14 @@ export function sendBrowserNotification(title, options = {}) {
 export function evaluateSmartReminders({ currentUser, workspace, now = new Date() }) {
   if (!workspace || !currentUser) return null;
 
-  const settings = workspace.notificationSettings || DEFAULT_NOTIFICATION_SETTINGS;
+  const settings = {
+    ...DEFAULT_NOTIFICATION_SETTINGS,
+    ...(workspace.notificationSettings || {}),
+    schedules: {
+      ...DEFAULT_NOTIFICATION_SETTINGS.schedules,
+      ...(workspace.notificationSettings?.schedules || {})
+    }
+  };
   if (!settings.enabled) return null;
 
   const sent = getSentTimestamps();
@@ -177,6 +191,112 @@ export function evaluateSmartReminders({ currentUser, workspace, now = new Date(
           title: '💧 Momento de hidratarte',
           body: `Llevas ${waterCount} de ${targetWater} vasos hoy (${remaining} restantes). Un vaso de agua te sentará genial.`,
           actionUrl: '/app'
+        };
+      }
+    }
+  }
+
+  // 3. Medicamentos declarados (solo si el usuario los declaró voluntariamente)
+  const vh = currentUser.voluntaryClinicalHistory;
+  const meds = vh?.consentGranted ? String(vh.medications || '').trim() : '';
+  const medMin = parseTime(settings.schedules.medicamento);
+  if (settings.medicationReminders && meds && medMin !== null && currentMinutes >= medMin && currentMinutes <= medMin + 90) {
+    const key = `med_${todayStr}`;
+    if (!sent[key]) {
+      recordSentTimestamp(key);
+      return {
+        id: `med-${todayStr}`,
+        type: 'medication',
+        title: '💊 Recordatorio de tus medicamentos',
+        body: `Declaraste: ${meds}. Tómalos como te indicó tu médico; tu Coach ya tiene en cuenta sus interacciones con los alimentos.`,
+        actionUrl: '/app/perfil'
+      };
+    }
+  }
+
+  // 4. Chequeo rápido de bienestar (10 s) si no lo ha hecho hoy
+  const checkMin = parseTime(settings.schedules.chequeo);
+  const hasCheckInToday = (workspace.wellnessCheckIns || []).some(c => c.date === todayStr);
+  if (settings.wellnessCheckInReminders && !hasCheckInToday && checkMin !== null && currentMinutes >= checkMin && currentMinutes <= checkMin + 120) {
+    const key = `checkin_${todayStr}`;
+    if (!sent[key]) {
+      recordSentTimestamp(key);
+      return {
+        id: `checkin-${todayStr}`,
+        type: 'wellness',
+        title: '🌿 Chequeo rápido de 10 segundos',
+        body: 'Cuéntale a tu Coach cómo van tu energía, hambre, digestión y sueño para afinar tus recomendaciones.',
+        actionUrl: '/app/coach'
+      };
+    }
+  }
+
+  // 5. Proteína: aviso por la tarde si va muy por debajo de su meta
+  const targetProtein = Number(currentUser.dailyProteinG ?? currentUser.proteinGrams) || 0;
+  const eatenProtein = dayMeals.reduce((acc, m) => acc + (Number(m.protein ?? m.proteinGrams) || 0), 0);
+  if (settings.proteinReminders && targetProtein > 0 && now.getHours() >= 17 && now.getHours() <= 20 && eatenProtein < targetProtein * 0.5) {
+    const key = `protein_${todayStr}`;
+    if (!sent[key]) {
+      recordSentTimestamp(key);
+      return {
+        id: `protein-${todayStr}`,
+        type: 'protein',
+        title: '🥚 Te falta proteína hoy',
+        body: `Llevas ${Math.round(eatenProtein)} g de ${Math.round(targetProtein)} g. Una cena con huevo, pescado, pollo o legumbres te ayuda a completarla.`,
+        actionUrl: '/app/coach'
+      };
+    }
+  }
+
+  // 6. Peso semanal (cada 7 días o más sin registrar, una vez por semana)
+  const weights = Array.isArray(workspace.weightHistory) ? workspace.weightHistory : [];
+  const lastWeightDate = weights.length ? weights[weights.length - 1].date : null;
+  if (settings.weeklyWeightReminders && lastWeightDate) {
+    const days = Math.floor((new Date(`${todayStr}T12:00:00`) - new Date(`${lastWeightDate}T12:00:00`)) / 86400000);
+    const key = `weight_${todayStr.slice(0, 7)}_w${Math.floor(now.getDate() / 7)}`;
+    if (days >= 7 && now.getHours() >= 8 && now.getHours() <= 11 && !sent[key]) {
+      recordSentTimestamp(key);
+      return {
+        id: `weight-${key}`,
+        type: 'weight',
+        title: '⚖️ Es hora de tu pesaje semanal',
+        body: `Hace ${days} días que no registras tu peso. Un registro semanal en ayunas basta para ver tu tendencia.`,
+        actionUrl: '/app/progreso'
+      };
+    }
+  }
+
+  // 7. Exámenes de laboratorio desactualizados (>180 días)
+  if (settings.labsStaleReminders && vh?.consentGranted && vh?.examDate) {
+    const examDays = Math.floor((new Date(`${todayStr}T12:00:00`) - new Date(`${vh.examDate}T12:00:00`)) / 86400000);
+    const key = `labs_${todayStr.slice(0, 7)}`;
+    if (examDays > 180 && !sent[key]) {
+      recordSentTimestamp(key);
+      return {
+        id: `labs-${key}`,
+        type: 'labs',
+        title: '🩺 Tus exámenes tienen más de 6 meses',
+        body: 'Si te hiciste controles nuevos, actualízalos para que tu Coach no use datos viejos. Si no, consulta con tu médico.',
+        actionUrl: '/app/perfil'
+      };
+    }
+  }
+
+  // 8. Inactividad: más de 1 día sin registrar comidas
+  if (settings.inactivityAlerts) {
+    const dates = (workspace.mealLogs || []).map(m => m.date).filter(Boolean).sort();
+    const lastMealDate = dates.length ? dates[dates.length - 1] : null;
+    if (lastMealDate) {
+      const idle = Math.floor((new Date(`${todayStr}T12:00:00`) - new Date(`${lastMealDate}T12:00:00`)) / 86400000);
+      const key = `idle_${todayStr}`;
+      if (idle >= 1 && now.getHours() >= 10 && now.getHours() <= 20 && !sent[key]) {
+        recordSentTimestamp(key);
+        return {
+          id: `idle-${todayStr}`,
+          type: 'inactivity',
+          title: '👋 Te extrañamos en NutriStudio',
+          body: `Hace ${idle} día(s) que no registras comidas. Retomar es fácil: tómale foto a tu próximo plato.`,
+          actionUrl: '/app/alimentos'
         };
       }
     }
